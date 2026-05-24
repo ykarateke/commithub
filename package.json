@@ -16,8 +16,84 @@
       {
         "command": "commithub.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "commithub.generateCommit",
+        "title": "CommitHub: Generate Commit Message",
+        "icon": "images/commithub-sparkle.svg"
+      },
+      {
+        "command": "commithub.setApiKey",
+        "title": "CommitHub: Set API Key"
+      },
+      {
+        "command": "commithub.setProvider",
+        "title": "CommitHub: Set AI Provider"
+      },
+      {
+        "command": "commithub.setModel",
+        "title": "CommitHub: Set Model"
+      },
+      {
+        "command": "commithub.setLanguage",
+        "title": "CommitHub: Set Language"
       }
-    ]
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "commithub.generateCommit",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "commithub.setApiKey",
+          "group": "navigation"
+        },
+        {
+          "command": "commithub.setProvider",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "commithub.setApiKey",
+          "group": "inline"
+        },
+        {
+          "command": "commithub.setProvider",
+          "group": "inline"
+        },
+        {
+          "command": "commithub.setModel",
+          "group": "inline"
+        },
+        {
+          "command": "commithub.setLanguage",
+          "group": "inline"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "commithub",
+          "title": "CommitHub",
+          "icon": "images/commithub-sparkle.svg"
+        }
+      ]
+    },
+    "views": {
+      "commithub": [
+        {
+          "type": "tree",
+          "id": "commithub.settingsView",
+          "name": "Settings"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

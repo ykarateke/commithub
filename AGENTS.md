@@ -4,6 +4,15 @@
 
 VS Code extension that generates conventional commit messages from git diffs using AI. Currently a boilerplate scaffold — real logic lives in `src/extension.ts`.
 
+## VS Code Commands
+
+| Command ID | Title | SCM Button? |
+|---|---|---|
+| `commithub.helloWorld` | Hello World | — |
+| `commithub.generateCommit` | CommitHub: Generate Commit Message | ✅ `scm/title` (git only) |
+
+The SCM title button uses `images/commithub-sparkle.svg` as icon and appears in the Source Control view title bar when git is active.
+
 ## Commands
 
 | Command | What it does |
