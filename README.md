@@ -1,14 +1,6 @@
-<p align="center">
-  <img src="images/commithub-sparkle.svg" width="64" height="64" alt="CommitHub">
-</p>
+# CommitHub
 
-<h1 align="center">CommitHub</h1>
-
-<p align="center">
-  <strong>AI-powered Git commit message generator for VS Code</strong>
-</p>
-
-<br>
+**AI-powered Git commit message generator for VS Code**
 
 Generate conventional commit messages from your staged changes with a single click. Supports 11+ AI providers, full Conventional Commits spec, emoji, 32 languages, and more.
 
