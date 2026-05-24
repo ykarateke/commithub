@@ -1,71 +1,174 @@
-# commithub README
+<p align="center">
+  <img src="images/commithub-sparkle.svg" width="64" height="64" alt="CommitHub">
+</p>
 
-This is the README for your extension "commithub". After writing up a brief description, we recommend including the following sections.
+<h1 align="center">CommitHub</h1>
+
+<p align="center">
+  <strong>AI-powered Git commit message generator for VS Code</strong>
+</p>
+
+<br>
+
+Generate conventional commit messages from your staged changes with a single click. Supports 11+ AI providers, full Conventional Commits spec, emoji, 32 languages, and more.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **One-click commit** — SCM title bar button generates a commit message from your git diff
+- **Writes to SCM input box** — the generated message appears directly in Source Control's input field; review, edit, then commit manually
+- **11+ AI providers** — OpenAI, Anthropic, Google Gemini, Zhipu GLM, xAI Grok, DeepSeek, Mistral, Ollama, OpenRouter, Groq, Together AI
+- **Conventional Commits** — `feat:`, `fix:`, `docs:`, `chore:` and more with a fully customizable type list
+- **Emoji support** — relevant emoji prefix on commit messages
+- **32 languages** — generate messages in Turkish, English, German, French, Japanese, Chinese, and more
+- **Scope Detection** — auto-detects scope from changed file paths (`feat(api):`, `fix(auth):`)
+- **Tone selection** — `formal`, `casual`, or `technical`
+- **Breaking Changes** — auto-detects breaking API changes and adds `BREAKING CHANGE:` footer
+- **Prerequisite system** — warns when required settings are missing and guides you to the right place
+- **Connection status** — status bar shows `✓ CommitHub` with live connection state
+- **Persistent statistics** — token usage, API call counts survive across sessions
+- **Debug channel** — dedicated Output Channel logs all API requests and responses
+- **Model discovery** — fetch available models directly from your provider's API
+- **Custom Base URL** — supports any OpenAI-compatible endpoint
 
-For example if there is an image subfolder under your extension project workspace:
+## Getting Started
 
-\!\[feature X\]\(images/feature-x.png\)
+1. **Install** from VS Code Marketplace
+2. Open the **CommitHub** panel in the Activity Bar
+3. Set your **API Key** (Settings → API Key)
+4. Choose your **Provider** (Settings → Provider)
+5. Click the **Generate** button (💀) in the Source Control title bar
+6. Review the message in the SCM input box, then `Ctrl+Enter` to commit
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Configuration
 
-## Requirements
+All settings are accessible from the CommitHub panel in the Activity Bar, organized into three groups:
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+### Provider
 
-## Extension Settings
+| Setting | Description | Default |
+|---|---|---|
+| Provider | AI provider | openai |
+| Connection | Test connection to the API | — |
+| API Key | API key (stored in SecretStorage) | — |
+| Model | Model name | gpt-4o |
+| Base URL | Custom API endpoint | (auto) |
+| Temperature | Creativity (0=deterministic, 2=creative) | 0.7 |
+| Max Tokens | Max response tokens | 2000 |
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+### Message
 
-For example:
+| Setting | Description | Default |
+|---|---|---|
+| Language | Commit language (32 locales) | auto |
+| Max Length | Subject line max characters | 72 |
+| Conventional Commit | Use Conventional Commits format | on |
+| Conventional Types | Allowed types (comma-separated) | feat, fix, chore, docs, style, refactor, perf, test, ci, build, revert |
+| Tone | Message tone | auto |
+| Include Body | Include detailed body | on |
+| Include Footer | Include footer section | off |
+| Emoji | Emoji prefix | off |
 
-This extension contributes the following settings:
+### Analysis
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+| Setting | Description | Default |
+|---|---|---|
+| Scope Detection | Auto-detect scope from file paths | on |
+| Breaking Changes | Detect breaking API changes | on |
+| Max Diff Size | Max diff characters sent to AI | 8000 |
+| Exclude Files | Glob patterns to exclude from diff (comma-separated) | — |
+| Statistics | Token & usage analytics | — |
 
-## Known Issues
+## Supported Providers
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+| Provider | Default Model | Base URL |
+|---|---|---|
+| OpenAI | gpt-4o | https://api.openai.com/v1 |
+| Anthropic | claude-sonnet-4-20250514 | https://api.anthropic.com/v1 |
+| Google Gemini | gemini-2.5-flash | https://generativelanguage.googleapis.com/v1beta |
+| Zhipu GLM | glm-4.7 | https://open.bigmodel.cn/api/paas/v4 |
+| xAI Grok | grok-4.1-fast | https://api.x.ai/v1 |
+| DeepSeek | deepseek-v4-flash | https://api.deepseek.com |
+| Mistral | mistral-large-latest | https://api.mistral.ai/v1 |
+| Ollama | llama3 | http://localhost:11434/v1 |
+| OpenRouter | gpt-4o | https://openrouter.ai/api/v1 |
+| Groq | llama-4-scout-17b | https://api.groq.com/openai/v1 |
+| Together AI | Llama-4-Scout-17B-16E-Instruct | https://api.together.xyz/v1 |
 
-## Release Notes
+### Notes
 
-Users appreciate release notes as you update your extension.
+- **Zhipu Coding Plan**: Set Base URL to `https://open.bigmodel.cn/api/coding/paas/v4`
+- **Ollama**: No API key required — runs locally
 
-### 1.0.0
+## Commands
 
-Initial release of ...
+| Command | Access |
+|---|---|
+| `CommitHub: Generate Commit Message` | SCM title bar 💀 button |
+| `CommitHub: Set API Key` | Settings → API Key |
+| `CommitHub: Set AI Provider` | Settings → Provider |
+| `CommitHub: Set Model` | Settings → Model (or Fetch from API) |
+| `CommitHub: Set Base URL` | Settings → Base URL |
+| `CommitHub: Set Temperature` | Settings → Temperature |
+| `CommitHub: Set Max Tokens` | Settings → Max Tokens |
+| `CommitHub: Set Language` | Settings → Language |
+| `CommitHub: Set Max Length` | Settings → Max Length |
+| `CommitHub: Toggle Conventional Commits` | Settings → Conventional Commit |
+| `CommitHub: Set Conventional Types` | Settings → Conventional Types |
+| `CommitHub: Toggle Include Body` | Settings → Include Body |
+| `CommitHub: Toggle Include Footer` | Settings → Include Footer |
+| `CommitHub: Toggle Emoji` | Settings → Emoji |
+| `CommitHub: Set Message Tone` | Settings → Tone |
+| `CommitHub: Toggle Scope Detection` | Settings → Scope Detection |
+| `CommitHub: Toggle Breaking Changes Detection` | Settings → Breaking Changes |
+| `CommitHub: Set Max Diff Size` | Settings → Max Diff Size |
+| `CommitHub: Set Exclude Files` | Settings → Exclude Files |
+| `CommitHub: Show Statistics` | Settings → Statistics |
+| `CommitHub: Test Connection` | Status bar `✓ CommitHub` |
+| `CommitHub: Fetch Models from API` | Settings → Model → Fetch |
 
-### 1.0.1
+## Development
 
-Fixed issue #.
+```bash
+# Install dependencies
+npm install
 
-### 1.1.0
+# Build (webpack → dist/extension.js)
+npm run compile
 
-Added features X, Y, and Z.
+# Watch mode
+npm run watch
 
----
+# Launch Extension Development Host (F5 in VS Code)
 
-## Following extension guidelines
+# Test
+npm test
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+# Lint
+npm run lint
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+# Package for publishing
+npm run package
+```
 
-## Working with Markdown
+### Architecture
 
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
+```
+src/
+├── extension.ts          # Entry point, all command registrations
+├── state.ts              # Global state (connection, stats, persistence)
+├── services/
+│   ├── git.ts            # Git diff reader (staged/unstaged, exclude patterns)
+│   └── ai.ts             # AI prompt builder + provider API calls
+└── views/
+    └── settingsView.ts   # Tree Data Provider (3 groups, 22 settings)
+```
 
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
+- **Dual compiler**: Extension built with webpack, tests with `tsc`
+- `vscode`, `https`, `http`, `child_process` are externalized in webpack config
+- API keys stored in `SecretStorage` (never written to settings.json)
+- Statistics persisted in `context.globalState` across sessions
+- All API calls use Node.js `https` module (bypasses extension host `fetch` proxy issues)
 
-## For more information
+## License
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+MIT

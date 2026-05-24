@@ -112,35 +112,31 @@
     },
     "commands": [
       {
-        "command": "commithub.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "commithub.generateCommit",
-        "title": "CommitHub: Generate Commit Message",
+        "title": "Generate Commit Message",
         "icon": "images/commithub-sparkle.svg"
       },
-      { "command": "commithub.setApiKey", "title": "CommitHub: Set API Key" },
-      { "command": "commithub.setProvider", "title": "CommitHub: Set AI Provider" },
-      { "command": "commithub.setModel", "title": "CommitHub: Set Model" },
-      { "command": "commithub.setBaseUrl", "title": "CommitHub: Set Base URL" },
-      { "command": "commithub.setTemperature", "title": "CommitHub: Set Temperature" },
-      { "command": "commithub.setMaxTokens", "title": "CommitHub: Set Max Tokens" },
-      { "command": "commithub.setLanguage", "title": "CommitHub: Set Language" },
-      { "command": "commithub.setMaxLength", "title": "CommitHub: Set Max Length" },
-      { "command": "commithub.setConventionalCommit", "title": "CommitHub: Toggle Conventional Commits" },
-      { "command": "commithub.setIncludeBody", "title": "CommitHub: Toggle Include Body" },
-      { "command": "commithub.setIncludeFooter", "title": "CommitHub: Toggle Include Footer" },
-      { "command": "commithub.setEmoji", "title": "CommitHub: Toggle Emoji" },
-      { "command": "commithub.setTone", "title": "CommitHub: Set Message Tone" },
-      { "command": "commithub.setScopeDetection", "title": "CommitHub: Toggle Scope Detection" },
-      { "command": "commithub.setBreakingChanges", "title": "CommitHub: Toggle Breaking Changes Detection" },
-      { "command": "commithub.setMaxDiffSize", "title": "CommitHub: Set Max Diff Size" },
-      { "command": "commithub.setExcludeFiles", "title": "CommitHub: Set Exclude Files" },
-      { "command": "commithub.setConventionalTypes", "title": "CommitHub: Set Conventional Types" },
-      { "command": "commithub.showStats", "title": "CommitHub: Show Statistics" },
-      { "command": "commithub.testConnection", "title": "CommitHub: Test Connection" },
-      { "command": "commithub.fetchModels", "title": "CommitHub: Fetch Models from API" }
+      { "command": "commithub.setApiKey", "title": "Set API Key" },
+      { "command": "commithub.setProvider", "title": "Set AI Provider" },
+      { "command": "commithub.setModel", "title": "Set Model" },
+      { "command": "commithub.setBaseUrl", "title": "Set Base URL" },
+      { "command": "commithub.setTemperature", "title": "Set Temperature" },
+      { "command": "commithub.setMaxTokens", "title": "Set Max Tokens" },
+      { "command": "commithub.setLanguage", "title": "Set Language" },
+      { "command": "commithub.setMaxLength", "title": "Set Max Length" },
+      { "command": "commithub.setConventionalCommit", "title": "Toggle Conventional Commits" },
+      { "command": "commithub.setIncludeBody", "title": "Toggle Include Body" },
+      { "command": "commithub.setIncludeFooter", "title": "Toggle Include Footer" },
+      { "command": "commithub.setEmoji", "title": "Toggle Emoji" },
+      { "command": "commithub.setTone", "title": "Set Message Tone" },
+      { "command": "commithub.setScopeDetection", "title": "Toggle Scope Detection" },
+      { "command": "commithub.setBreakingChanges", "title": "Toggle Breaking Changes Detection" },
+      { "command": "commithub.setMaxDiffSize", "title": "Set Max Diff Size" },
+      { "command": "commithub.setExcludeFiles", "title": "Set Exclude Files" },
+      { "command": "commithub.setConventionalTypes", "title": "Set Conventional Types" },
+      { "command": "commithub.showStats", "title": "Show Statistics" },
+      { "command": "commithub.testConnection", "title": "Test Connection" },
+      { "command": "commithub.fetchModels", "title": "Fetch Models from API" }
     ],
     "menus": {
       "scm/title": [
@@ -150,10 +146,7 @@
           "when": "scmProvider == git"
         }
       ],
-      "view/title": [
-        { "command": "commithub.setApiKey", "group": "navigation" },
-        { "command": "commithub.setProvider", "group": "navigation" }
-      ]
+      "view/title": []
     },
     "viewsContainers": {
       "activitybar": [

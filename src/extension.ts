@@ -201,12 +201,6 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('commithub.helloWorld', () => {
-			vscode.window.showInformationMessage('Hello World from CommitHub!');
-		})
-	);
-
-	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.generateCommit', async () => {
 			const provider = cfg().get<string>('provider', '');
 			if (!provider) {
