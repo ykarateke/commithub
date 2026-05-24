@@ -12,6 +12,38 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "CommitHub",
+      "properties": {
+        "commithub.provider": {
+          "type": "string",
+          "default": "openai",
+          "enum": ["openai", "anthropic", "ollama"],
+          "description": "AI provider for commit message generation"
+        },
+        "commithub.model": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "AI model name"
+        },
+        "commithub.language": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "tr", "en"],
+          "description": "Commit message language"
+        },
+        "commithub.maxLength": {
+          "type": "number",
+          "default": 72,
+          "description": "Maximum commit message length"
+        },
+        "commithub.conventionalCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use Conventional Commits format"
+        }
+      }
+    },
     "commands": [
       {
         "command": "commithub.helloWorld",

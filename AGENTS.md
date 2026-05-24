@@ -6,12 +6,13 @@ VS Code extension that generates conventional commit messages from git diffs usi
 
 ## VS Code Commands
 
-| Command ID | Title | SCM Button? |
-|---|---|---|
-| `commithub.helloWorld` | Hello World | — |
-| `commithub.generateCommit` | CommitHub: Generate Commit Message | ✅ `scm/title` (git only) |
+| Command ID | Title | SCM Button? | Sidebar? |
+|---|---|---|---|
+| `commithub.helloWorld` | Hello World | — | — |
+| `commithub.generateCommit` | CommitHub: Generate Commit Message | ✅ `scm/title` | — |
 
-The SCM title button uses `images/commithub-sparkle.svg` as icon and appears in the Source Control view title bar when git is active.
+The SCM title button uses VS Code's built-in `sparkle` codicon (via `SourceControl.actionButton` with `ThemeIcon`) and appears in the Source Control view title bar.
+The activity bar icon uses `images/commithub-sparkle.svg` — click it to open the CommitHub sidebar with settings (API key, provider, model, language).
 
 ## Commands
 
