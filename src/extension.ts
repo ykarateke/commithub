@@ -221,94 +221,100 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			statusItem.text = '$(sync~spin) generating...';
-			statusItem.tooltip = 'Generating commit message';
-
 			const excludePatterns = cfg().get<string>('excludeFiles', '')
 				.split(',')
 				.map(s => s.trim())
 				.filter(Boolean);
 
-			try {
-				const git = await getGitDiff(workspaceRoot, excludePatterns);
-				if (!git.diff) {
-					vscode.window.showInformationMessage('CommitHub: No changes detected to commit');
-					statusItem.text = '$(plug) CommitHub';
-					statusItem.tooltip = 'Click to test connection';
-					return;
-				}
-
-				const maxSize = cfg().get('maxDiffSize', 8000);
-				const diff = git.diff.length > maxSize
-					? git.diff.slice(0, maxSize) + '\n... (truncated)'
-					: git.diff;
-
-				const model = cfg().get<string>('model', 'gpt-4o');
-				const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
-
-				const t0 = Date.now();
-				log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} diffLen=${diff.length}`);
-				const rawTypes = cfg().get<string>('conventionalTypes', '');
-				const result = await generateCommitMessage(provider, baseUrl, model, key || undefined, {
-					diff,
-					stats: git.stats,
-					files: git.files,
-					language: cfg().get<string>('language', 'auto'),
-					maxLength: cfg().get('maxLength', 72),
-					conventionalCommit: cfg().get('conventionalCommit', true),
-					includeBody: cfg().get('includeBody', true),
-					includeFooter: cfg().get('includeFooter', false),
-					emoji: cfg().get('emoji', false),
-					tone: cfg().get<string>('tone', 'auto'),
-					scopeDetection: cfg().get('scopeDetection', true),
-					breakingChanges: cfg().get('breakingChanges', true),
-					temperature: cfg().get('temperature', 0.7),
-					maxTokens: cfg().get('maxTokens', 2000),
-					conventionalTypes: rawTypes ? rawTypes.split(',').map(s => s.trim()).filter(Boolean) : [],
-				});
-				const durationMs = Date.now() - t0;
-				log.info(`[generateCommit] OK — ${result.usage.inputTokens}in ${result.usage.outputTokens}out ${durationMs}ms`);
-				recordCall({
-					provider,
-					model,
-					inputTokens: result.usage.inputTokens,
-					outputTokens: result.usage.outputTokens,
-					durationMs,
-				});
-
-				const msg = result.text;
-				if (!msg) {
-					const hint = result.finishReason === 'length'
-						? ' — model ran out of tokens. Increase Max Tokens in settings.'
-						: '';
-					vscode.window.showErrorMessage(`CommitHub: AI returned an empty response${hint}`);
-					return;
-				}
-
-				{
-					const gitExt = vscode.extensions.getExtension('vscode.git');
-					if (gitExt?.exports) {
-						const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
-						const repo = gitApi?.repositories?.[0];
-						if (repo?.inputBox) {
-							repo.inputBox.value = msg;
-							vscode.commands.executeCommand('workbench.view.scm');
-						} else {
-							vscode.window.showErrorMessage('CommitHub: No git repository found');
-						}
-					} else {
-						vscode.window.showErrorMessage('CommitHub: Git extension not available');
+			vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'CommitHub: Generating commit message...',
+				cancellable: true,
+			}, async (progress, token) => {
+				try {
+					const git = await getGitDiff(workspaceRoot, excludePatterns);
+					if (!git.hasChanges) {
+						vscode.window.showInformationMessage('CommitHub: No changes detected to commit');
+						statusItem.text = '$(plug) CommitHub';
+						statusItem.tooltip = 'Click to test connection';
+						return;
 					}
-				}
 
-				statusItem.text = '$(check) CommitHub';
-				statusItem.tooltip = 'Connected — click to test';
-			} catch (e: any) {
-				log.error(`[generateCommit] FAILED — ${e.message}`);
-				vscode.window.showErrorMessage(`CommitHub: ${e.message}`);
-				statusItem.text = '$(error) CommitHub';
-				statusItem.tooltip = `Error: ${e.message}`;
-			}
+					const maxSize = cfg().get('maxDiffSize', 8000);
+					const diff = git.diff.length > maxSize
+						? git.diff.slice(0, maxSize) + '\n... (truncated)'
+						: git.diff;
+
+					const model = cfg().get<string>('model', 'gpt-4o');
+					const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
+
+					log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} diffLen=${diff.length}`);
+					const rawTypes = cfg().get<string>('conventionalTypes', '');
+					const abort = new AbortController();
+					token.onCancellationRequested(() => abort.abort());
+					const t0 = Date.now();
+					const result = await generateCommitMessage(provider, baseUrl, model, key || undefined, {
+						diff,
+						stats: git.stats,
+						files: git.files,
+						language: cfg().get<string>('language', 'auto'),
+						maxLength: cfg().get('maxLength', 72),
+						conventionalCommit: cfg().get('conventionalCommit', true),
+						includeBody: cfg().get('includeBody', true),
+						includeFooter: cfg().get('includeFooter', false),
+						emoji: cfg().get('emoji', false),
+						tone: cfg().get<string>('tone', 'auto'),
+						scopeDetection: cfg().get('scopeDetection', true),
+						breakingChanges: cfg().get('breakingChanges', true),
+						temperature: cfg().get('temperature', 0.7),
+						maxTokens: cfg().get('maxTokens', 2000),
+						conventionalTypes: rawTypes ? rawTypes.split(',').map(s => s.trim()).filter(Boolean) : [],
+					}, abort.signal);
+					const durationMs = Date.now() - t0;
+					log.info(`[generateCommit] OK — ${result.usage.inputTokens}in ${result.usage.outputTokens}out ${durationMs}ms`);
+					recordCall({
+						provider,
+						model,
+						inputTokens: result.usage.inputTokens,
+						outputTokens: result.usage.outputTokens,
+						durationMs,
+					});
+
+					const msg = result.text;
+					if (!msg) {
+						const hint = result.finishReason === 'length'
+							? ' — model ran out of tokens. Increase Max Tokens in settings.'
+							: '';
+						vscode.window.showErrorMessage(`CommitHub: AI returned an empty response${hint}`);
+						return;
+					}
+
+					{
+						const gitExt = vscode.extensions.getExtension('vscode.git');
+						if (gitExt?.exports) {
+							const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
+							const repo = gitApi?.repositories?.[0];
+							if (repo?.inputBox) {
+								repo.inputBox.value = msg;
+								vscode.commands.executeCommand('workbench.view.scm');
+							} else {
+								vscode.window.showErrorMessage('CommitHub: No git repository found');
+							}
+						} else {
+							vscode.window.showErrorMessage('CommitHub: Git extension not available');
+						}
+					}
+
+					statusItem.text = '$(check) CommitHub';
+					statusItem.tooltip = 'Connected — click to test';
+				} catch (e: any) {
+					if (token.isCancellationRequested) { return; }
+					log.error(`[generateCommit] FAILED — ${e.message}`);
+					vscode.window.showErrorMessage(`CommitHub: ${e.message}`);
+					statusItem.text = '$(error) CommitHub';
+					statusItem.tooltip = `Error: ${e.message}`;
+				}
+			});
 		})
 	);
 

@@ -1,40 +1,55 @@
 import { exec } from 'child_process';
+import * as fs from 'fs';
 
 export interface GitDiffResult {
 	diff: string;
-	hasStaged: boolean;
+	hasChanges: boolean;
 	files: string[];
 	stats: string;
 }
 
-export function getGitDiff(cwd: string, excludePatterns: string[] = []): Promise<GitDiffResult> {
+function execCmd(cmd: string, cwd: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		exec(cmd, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+			if (err) { reject(err); return; }
+			resolve(stdout);
+		});
+	});
+}
+
+export async function getGitDiff(cwd: string, excludePatterns: string[] = []): Promise<GitDiffResult> {
 	const excludeArgs = excludePatterns.length
 		? ' -- ' + excludePatterns.map(p => `':(exclude)${p}'`).join(' ')
 		: '';
 
-	return new Promise((resolve, reject) => {
-		exec(`git diff HEAD --stat${excludeArgs}`, { cwd, maxBuffer: 1024 * 1024 }, (err, statOut) => {
-			if (err) {
-				reject(new Error(`Failed to read git status: ${err.message}`));
-				return;
-			}
-			const hasStaged = statOut.trim().length > 0;
-			if (!hasStaged) {
-				resolve({ diff: '', hasStaged: false, files: [], stats: statOut });
-				return;
-			}
-			exec(`git diff HEAD${excludeArgs}`, { cwd, maxBuffer: 1024 * 1024 }, (err2, diffOut) => {
-				if (err2) {
-					reject(new Error(`Failed to read diff: ${err2.message}`));
-					return;
-				}
-				const diff = diffOut || '';
-				const files = diff
-					.split('\n')
-					.filter(l => l.startsWith('diff --git'))
-					.map(l => l.replace('diff --git a/', '').replace(' b/', ' — ').split(' — ')[1] || '');
-				resolve({ diff, hasStaged, files, stats: statOut });
-			});
-		});
-	});
+	const [trackedDiff, untrackedRaw] = await Promise.all([
+		execCmd(`git diff HEAD${excludeArgs}`, cwd),
+		execCmd(`git ls-files --others --exclude-standard${excludeArgs}`, cwd),
+	]);
+
+	const untrackedFiles = untrackedRaw.split('\n').filter(Boolean);
+	const untrackedDiffs: string[] = [];
+	for (const f of untrackedFiles) {
+		const fullPath = `${cwd}/${f}`;
+		try {
+			const content = fs.readFileSync(fullPath, 'utf-8');
+			untrackedDiffs.push(`diff --git a/${f} b/${f}\nnew file mode 100644\nindex 0000000..0000000\n--- /dev/null\n+++ b/${f}\n@@ -0,0 +1,${content.split('\n').length} @@\n${content}`);
+		} catch { /* skip unreadable */ }
+	}
+
+	const allDiffs = [trackedDiff, ...untrackedDiffs].filter(Boolean).join('\n');
+	const allFiles = [
+		...trackedDiff.split('\n').filter(l => l.startsWith('diff --git')).map(l => l.replace('diff --git a/', '').replace(' b/', ' — ').split(' — ')[1] || ''),
+		...untrackedFiles,
+	];
+	const trackedStat = trackedDiff ? `tracked: ${trackedDiff.split('\n').filter(l => l.startsWith('diff --git')).length} file(s)` : '';
+
+	const hasChanges = allDiffs.trim().length > 0;
+
+	return {
+		diff: allDiffs,
+		hasChanges,
+		files: allFiles,
+		stats: [trackedStat, ...(untrackedFiles.length ? [`new: ${untrackedFiles.join(', ')}`] : [])].filter(Boolean).join('\n'),
+	};
 }

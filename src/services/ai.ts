@@ -90,7 +90,7 @@ function buildPrompt(s: CommitSettings): string {
 	return lines.join('\n');
 }
 
-function postJson(url: string, body: any, headers: Record<string, string>, timeout = 60000): Promise<any> {
+function postJson(url: string, body: any, headers: Record<string, string>, timeout = 60000, signal?: AbortSignal): Promise<any> {
 	return new Promise((resolve, reject) => {
 		const mod = url.startsWith('https') ? https : http;
 		const data = JSON.stringify(body);
@@ -102,6 +102,7 @@ function postJson(url: string, body: any, headers: Record<string, string>, timeo
 			method: 'POST',
 			headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
 			timeout,
+			signal,
 		};
 		const req = mod.request(options, (res) => {
 			const chunks: Buffer[] = [];
@@ -120,8 +121,14 @@ function postJson(url: string, body: any, headers: Record<string, string>, timeo
 				}
 			});
 		});
-		req.on('error', reject);
+		req.on('error', (e) => {
+			if (e.name === 'AbortError') { reject(new Error('Canceled')); return; }
+			reject(e);
+		});
 		req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+		if (signal) {
+			signal.addEventListener('abort', () => { req.destroy(); }, { once: true });
+		}
 		req.write(data);
 		req.end();
 	});
@@ -138,6 +145,7 @@ export async function generateCommitMessage(
 	model: string,
 	apiKey: string | undefined,
 	settings: CommitSettings,
+	signal?: AbortSignal,
 ): Promise<{ text: string; usage: CommitUsage; finishReason: string }> {
 	const prompt = buildPrompt(settings);
 
@@ -160,7 +168,7 @@ export async function generateCommitMessage(
 				'x-api-key': apiKey || '',
 				'anthropic-version': '2023-06-01',
 			};
-			const data = await postJson(url, body, headers);
+			const data = await postJson(url, body, headers, 60000, signal);
 			commitMsg = data?.content?.[0]?.text || '';
 			finishReason = data?.content?.[0]?.stop_reason || data?.content?.[0]?.stop_sequence || '';
 			usage = {
@@ -173,7 +181,7 @@ export async function generateCommitMessage(
 				contents: [{ role: 'user', parts: [{ text: prompt + '\n\nGenerate the commit message now.' }] }],
 			};
 			const headers: Record<string, string> = { 'x-goog-api-key': apiKey || '' };
-			const data = await postJson(url, body, headers);
+			const data = await postJson(url, body, headers, 60000, signal);
 			commitMsg = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 			finishReason = data?.candidates?.[0]?.finishReason || '';
 			usage = {
@@ -193,7 +201,7 @@ export async function generateCommitMessage(
 			};
 			const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey || ''}` };
 			console.log(`[CommitHub AI] POST ${url} model=${model} temperature=${settings.temperature} maxTokens=${settings.maxTokens}`);
-			const data = await postJson(url, body, headers);
+			const data = await postJson(url, body, headers, 60000, signal);
 			commitMsg = data?.choices?.[0]?.message?.content || '';
 			finishReason = data?.choices?.[0]?.finish_reason || '';
 			usage = {
@@ -204,6 +212,7 @@ export async function generateCommitMessage(
 
 		return { text: commitMsg.trim(), usage, finishReason };
 	} catch (e: any) {
+		if (e.message === 'Canceled') { throw e; }
 		throw new Error(`AI request failed: ${e.message}`);
 	}
 }
