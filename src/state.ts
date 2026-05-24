@@ -1,3 +1,5 @@
+import * as vscode from 'vscode';
+
 export let connectionStatus = 'untested';
 export function setConnectionStatus(v: string) { connectionStatus = v; }
 
@@ -11,6 +13,20 @@ export const stats = {
 	lastOutputTokens: 0,
 	lastDurationMs: 0,
 };
+
+let _globalState: vscode.Memento | undefined;
+
+export function initState(context: vscode.ExtensionContext) {
+	_globalState = context.globalState;
+	const saved = _globalState.get<typeof stats>('commithub.stats');
+	if (saved) {
+		Object.assign(stats, saved);
+	}
+}
+
+function persist() {
+	_globalState?.update('commithub.stats', { ...stats });
+}
 
 export function recordCall(opts: {
 	provider: string;
@@ -27,6 +43,7 @@ export function recordCall(opts: {
 	stats.lastInputTokens = opts.inputTokens;
 	stats.lastOutputTokens = opts.outputTokens;
 	stats.lastDurationMs = opts.durationMs;
+	persist();
 }
 
 export function getStatsSummary(): string {

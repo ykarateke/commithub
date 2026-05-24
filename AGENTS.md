@@ -38,7 +38,7 @@ The activity bar icon uses `images/commithub-sparkle.svg` — click it to open t
 
 - **Two separate compilers**: webpack builds the extension, `tsc` builds tests. They use same `tsconfig.json` but different output dirs.
 - `vscode` module is **externalized** in webpack — never import it in test helpers that run outside the VS Code host.
-- `activationEvents: []` in `package.json` — extension activates lazily on first command execution. Not `"*"` or `onStartupFinished`.
+- `activationEvents: ["onStartupFinished"]` in `package.json` — extension activates after VS Code finishes startup so status bar item appears immediately without requiring user interaction.
 - Entry: `src/extension.ts` → `dist/extension.js` (CommonJS2 target).
 - `src/` is excluded from published `.vsix` via `.vscodeignore`.
 - `strict: true` in tsconfig.

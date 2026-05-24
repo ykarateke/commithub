@@ -9,7 +9,7 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
@@ -40,7 +40,7 @@
         },
         "commithub.maxTokens": {
           "type": "number",
-          "default": 500,
+          "default": 2000,
           "minimum": 50,
           "description": "Maximum tokens for AI response"
         },
@@ -102,6 +102,11 @@
           "type": "string",
           "default": "",
           "description": "Comma-separated glob patterns to exclude from diff analysis"
+        },
+        "commithub.conventionalTypes": {
+          "type": "string",
+          "default": "feat, fix, chore, docs, style, refactor, perf, test, ci, build, revert",
+          "description": "Comma-separated conventional commit types allowed"
         }
       }
     },
@@ -132,6 +137,7 @@
       { "command": "commithub.setBreakingChanges", "title": "CommitHub: Toggle Breaking Changes Detection" },
       { "command": "commithub.setMaxDiffSize", "title": "CommitHub: Set Max Diff Size" },
       { "command": "commithub.setExcludeFiles", "title": "CommitHub: Set Exclude Files" },
+      { "command": "commithub.setConventionalTypes", "title": "CommitHub: Set Conventional Types" },
       { "command": "commithub.showStats", "title": "CommitHub: Show Statistics" },
       { "command": "commithub.testConnection", "title": "CommitHub: Test Connection" },
       { "command": "commithub.fetchModels", "title": "CommitHub: Fetch Models from API" }

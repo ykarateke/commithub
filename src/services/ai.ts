@@ -14,6 +14,9 @@ interface CommitSettings {
 	tone: string;
 	scopeDetection: boolean;
 	breakingChanges: boolean;
+	temperature: number;
+	maxTokens: number;
+	conventionalTypes: string[];
 }
 
 const langNames: Record<string, string> = {
@@ -26,11 +29,17 @@ const langNames: Record<string, string> = {
 	sk: 'Slovak', sl: 'Slovenian',
 };
 
+const toneNames: Record<string, string> = {
+	formal: 'professional and structured, use proper grammar',
+	casual: 'friendly and conversational, but still clear',
+	technical: 'precise and code-focused, use technical terminology',
+};
+
 function buildPrompt(s: CommitSettings): string {
 	const lang = s.language === 'auto' ? 'same as the codebase' : (langNames[s.language] || 'English');
 
 	const lines: string[] = [
-		`You are a commit message generator. Generate a ${lang} git commit message for the following diff.`,
+		`You are a git commit message generator. Generate a ${lang} commit message for the following diff.`,
 		'',
 		'## Changed files',
 		s.stats,
@@ -38,47 +47,50 @@ function buildPrompt(s: CommitSettings): string {
 		'## Diff',
 		s.diff,
 		'',
-		'## Rules',
+		'## Output format',
 	];
 
 	if (s.conventionalCommit) {
 		lines.push('- Use Conventional Commits format: `type(scope): subject`');
-		lines.push('  Types: feat, fix, chore, docs, style, refactor, perf, test, ci, build, revert');
+		const types = s.conventionalTypes.length ? s.conventionalTypes : ['feat', 'fix', 'chore', 'docs', 'style', 'refactor', 'perf', 'test', 'ci', 'build', 'revert'];
+		lines.push(`  Valid types: ${types.join(', ')}`);
 		if (s.scopeDetection) {
-			lines.push('- Auto-detect scope from file paths (e.g., feat(api):, fix(auth):)');
+			lines.push('- Auto-detect scope from changed file paths (e.g., feat(api):, fix(auth):)');
+		}
+		if (s.includeBody) {
+			lines.push('- Add a blank line after subject, then a detailed body explaining what and why (not how)');
+			lines.push('- Wrap body lines at 72 characters');
 		}
 		if (s.breakingChanges) {
-			lines.push('- Detect breaking changes and add `BREAKING CHANGE:` in footer');
+			lines.push('- If the diff contains breaking API/behavior changes, add `BREAKING CHANGE:` in the footer');
 		}
-		if (s.includeFooter) {
-			lines.push('- Include relevant issue references or breaking change notes in footer');
+		if (s.includeFooter || s.breakingChanges) {
+			lines.push('- Footer goes after a blank line following the body');
 		}
 	} else {
-		lines.push('- Write a clear, concise subject line');
+		lines.push('- Write a single subject line (no type or scope prefix)');
+		if (s.includeBody) {
+			lines.push('- Add a blank line after subject, then a body explaining what and why');
+		}
 	}
 
-	lines.push(`- Subject line max ${s.maxLength} characters`);
-
-	if (s.includeBody) {
-		lines.push('- Include a detailed body explaining what and why (not how)');
-		lines.push('- Wrap body at 72 characters per line');
-	}
+	lines.push(`- Subject line: max ${s.maxLength} characters`);
 
 	if (s.emoji) {
-		lines.push('- Add an appropriate emoji at the start of the subject line');
+		lines.push('- Prefix the subject line with a relevant emoji');
 	}
 
-	if (s.tone !== 'auto') {
-		lines.push(`- Tone: ${s.tone}`);
+	if (s.tone !== 'auto' && toneNames[s.tone]) {
+		lines.push(`- Tone: ${toneNames[s.tone]}`);
 	}
 
 	lines.push('');
-	lines.push('Return ONLY the commit message, no extra text or markdown.');
+	lines.push('Return ONLY the commit message. No markdown, no code fences, no extra explanation.');
 
 	return lines.join('\n');
 }
 
-function postJson(url: string, body: any, headers: Record<string, string>, timeout = 30000): Promise<any> {
+function postJson(url: string, body: any, headers: Record<string, string>, timeout = 60000): Promise<any> {
 	return new Promise((resolve, reject) => {
 		const mod = url.startsWith('https') ? https : http;
 		const data = JSON.stringify(body);
@@ -97,11 +109,15 @@ function postJson(url: string, body: any, headers: Record<string, string>, timeo
 			res.on('end', () => {
 				const bodyText = Buffer.concat(chunks).toString();
 				if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+					console.error(`[CommitHub AI] HTTP ${res.statusCode}: ${bodyText.slice(0, 500)}`);
 					reject(new Error(`HTTP ${res.statusCode}: ${bodyText.slice(0, 200)}`));
 					return;
 				}
 				try { resolve(JSON.parse(bodyText)); }
-				catch { reject(new Error(`Invalid JSON: ${bodyText.slice(0, 200)}`)); }
+				catch {
+					console.error(`[CommitHub AI] Invalid JSON: ${bodyText.slice(0, 500)}`);
+					reject(new Error(`Invalid JSON: ${bodyText.slice(0, 200)}`));
+				}
 			});
 		});
 		req.on('error', reject);
@@ -122,32 +138,31 @@ export async function generateCommitMessage(
 	model: string,
 	apiKey: string | undefined,
 	settings: CommitSettings,
-): Promise<{ text: string; usage: CommitUsage }> {
+): Promise<{ text: string; usage: CommitUsage; finishReason: string }> {
 	const prompt = buildPrompt(settings);
-	const messages = [
-		{ role: 'system', content: prompt },
-	];
 
 	const providerConfig = provider === 'anthropic' ? 'anthropic' : provider === 'google_gemini' ? 'gemini' : 'openai';
 
 	try {
 		let commitMsg: string;
 		let usage: CommitUsage = { inputTokens: 0, outputTokens: 0 };
+		let finishReason = '';
 
 		if (providerConfig === 'anthropic') {
 			const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
 			const body = {
 				model,
-				max_tokens: 2000,
+				max_tokens: settings.maxTokens,
 				system: prompt,
-				messages: [{ role: 'user', content: 'Generate a commit message for the above diff.' }],
+				messages: [{ role: 'user', content: 'Generate the commit message now.' }],
 			};
 			const headers: Record<string, string> = {
 				'x-api-key': apiKey || '',
 				'anthropic-version': '2023-06-01',
 			};
-			const data = await postJson(url, body, headers, 30000);
+			const data = await postJson(url, body, headers);
 			commitMsg = data?.content?.[0]?.text || '';
+			finishReason = data?.content?.[0]?.stop_reason || data?.content?.[0]?.stop_sequence || '';
 			usage = {
 				inputTokens: data?.usage?.input_tokens ?? 0,
 				outputTokens: data?.usage?.output_tokens ?? 0,
@@ -158,8 +173,9 @@ export async function generateCommitMessage(
 				contents: [{ role: 'user', parts: [{ text: prompt + '\n\nGenerate the commit message now.' }] }],
 			};
 			const headers: Record<string, string> = { 'x-goog-api-key': apiKey || '' };
-			const data = await postJson(url, body, headers, 30000);
+			const data = await postJson(url, body, headers);
 			commitMsg = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+			finishReason = data?.candidates?.[0]?.finishReason || '';
 			usage = {
 				inputTokens: data?.usageMetadata?.promptTokenCount ?? 0,
 				outputTokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
@@ -168,20 +184,25 @@ export async function generateCommitMessage(
 			const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 			const body = {
 				model,
-				messages,
-				temperature: 0.4,
-				max_tokens: 2000,
+				messages: [
+					{ role: 'system', content: prompt },
+					{ role: 'user', content: 'Generate the commit message now.' },
+				],
+				temperature: settings.temperature,
+				max_tokens: settings.maxTokens,
 			};
 			const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey || ''}` };
-			const data = await postJson(url, body, headers, 30000);
+			console.log(`[CommitHub AI] POST ${url} model=${model} temperature=${settings.temperature} maxTokens=${settings.maxTokens}`);
+			const data = await postJson(url, body, headers);
 			commitMsg = data?.choices?.[0]?.message?.content || '';
+			finishReason = data?.choices?.[0]?.finish_reason || '';
 			usage = {
 				inputTokens: data?.usage?.prompt_tokens ?? 0,
 				outputTokens: data?.usage?.completion_tokens ?? 0,
 			};
 		}
 
-		return { text: commitMsg.trim(), usage };
+		return { text: commitMsg.trim(), usage, finishReason };
 	} catch (e: any) {
 		throw new Error(`AI request failed: ${e.message}`);
 	}

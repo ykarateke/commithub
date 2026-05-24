@@ -2,14 +2,15 @@ import * as vscode from 'vscode';
 import { SettingsProvider } from './views/settingsView';
 import * as https from 'https';
 import * as http from 'http';
-import { exec } from 'child_process';
-import { setConnectionStatus, recordCall, stats } from './state';
+import { setConnectionStatus, recordCall, stats, initState } from './state';
 import { getGitDiff } from './services/git';
 import { generateCommitMessage } from './services/ai';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
 }
+
+const log = vscode.window.createOutputChannel('CommitHub', { log: true });
 
 /** Make an HTTPS/HTTP GET request and return parsed JSON. */
 function httpGetJson(url: string, headers: Record<string, string>): Promise<any> {
@@ -50,6 +51,20 @@ const providerBaseUrls: Record<string, string> = {
 	together: 'https://api.together.xyz/v1',
 };
 
+const providerDefaultModels: Record<string, string> = {
+	openai: 'gpt-4o',
+	anthropic: 'claude-sonnet-4-20250514',
+	google_gemini: 'gemini-2.5-flash',
+	zhipu_glm: 'glm-4.7',
+	xai_grok: 'grok-4.1-fast',
+	deepseek: 'deepseek-v4-flash',
+	mistral: 'mistral-large-latest',
+	ollama: 'llama3',
+	openrouter: 'gpt-4o',
+	groq: 'llama-4-scout-17b',
+	together: 'meta-llama/Llama-4-Scout-17B-16E-Instruct',
+};
+
 /** Returns a list of { label, description } models fetched from the current provider's API. */
 async function fetchModels(apiKey: string | undefined): Promise<{ label: string; description: string }[] | undefined> {
 	const provider = cfg().get<string>('provider', '');
@@ -78,7 +93,7 @@ async function fetchModels(apiKey: string | undefined): Promise<{ label: string;
 		return undefined;
 	}
 
-	vscode.window.showInformationMessage(`CommitHub: Fetching models from ${provider}...`);
+	log.info(`[fetchModels] GET ${url}`);
 
 	try {
 		const headers: Record<string, string> = {};
@@ -98,15 +113,18 @@ async function fetchModels(apiKey: string | undefined): Promise<{ label: string;
 		else if (data.models) {models = data.models;}
 
 		if (!models || !models.length) {
+			log.warn('[fetchModels] no models returned');
 			vscode.window.showInformationMessage('CommitHub: No models returned by API. Type model name manually.');
 			return undefined;
 		}
 
+		log.info(`[fetchModels] OK — ${models.length} models`);
 		return models.map(m => ({
 			label: m.id,
 			description: m.display_name || m.name || m.owned_by || '',
 		}));
 	} catch (e: any) {
+		log.error(`[fetchModels] FAILED — ${e.message}`);
 		vscode.window.showErrorMessage(`CommitHub: Model fetch failed — ${e.message}`);
 		return undefined;
 	}
@@ -160,6 +178,8 @@ async function requireSetup(
 export function activate(context: vscode.ExtensionContext) {
 	console.log('[CommitHub] extension active');
 
+	initState(context);
+
 	const settingsProvider = new SettingsProvider();
 
 	context.subscriptions.push(
@@ -173,8 +193,11 @@ export function activate(context: vscode.ExtensionContext) {
 	statusItem.show();
 	context.subscriptions.push(statusItem);
 
-	if (cfg().get<string>('provider', '')) {
-		vscode.commands.executeCommand('commithub.testConnection');
+	const initialProvider = cfg().get<string>('provider', '');
+	if (initialProvider) {
+		setConnectionStatus('connected');
+		statusItem.text = '$(check) CommitHub';
+		statusItem.tooltip = `Connected to ${initialProvider} — click to retest`;
 	}
 
 	context.subscriptions.push(
@@ -230,6 +253,8 @@ export function activate(context: vscode.ExtensionContext) {
 				const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
 
 				const t0 = Date.now();
+				log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} diffLen=${diff.length}`);
+				const rawTypes = cfg().get<string>('conventionalTypes', '');
 				const result = await generateCommitMessage(provider, baseUrl, model, key || undefined, {
 					diff,
 					stats: git.stats,
@@ -243,8 +268,12 @@ export function activate(context: vscode.ExtensionContext) {
 					tone: cfg().get<string>('tone', 'auto'),
 					scopeDetection: cfg().get('scopeDetection', true),
 					breakingChanges: cfg().get('breakingChanges', true),
+					temperature: cfg().get('temperature', 0.7),
+					maxTokens: cfg().get('maxTokens', 2000),
+					conventionalTypes: rawTypes ? rawTypes.split(',').map(s => s.trim()).filter(Boolean) : [],
 				});
 				const durationMs = Date.now() - t0;
+				log.info(`[generateCommit] OK — ${result.usage.inputTokens}in ${result.usage.outputTokens}out ${durationMs}ms`);
 				recordCall({
 					provider,
 					model,
@@ -255,39 +284,33 @@ export function activate(context: vscode.ExtensionContext) {
 
 				const msg = result.text;
 				if (!msg) {
-					vscode.window.showErrorMessage('CommitHub: AI returned an empty response');
+					const hint = result.finishReason === 'length'
+						? ' — model ran out of tokens. Increase Max Tokens in settings.'
+						: '';
+					vscode.window.showErrorMessage(`CommitHub: AI returned an empty response${hint}`);
 					return;
 				}
 
-				const finalMsg = await vscode.window.showInputBox({
-					title: 'CommitHub — Review & Edit Commit Message',
-					value: msg,
-					prompt: 'Edit the commit message then press Enter to commit, or ESC to cancel.',
-					ignoreFocusOut: true,
-					placeHolder: msg,
-				});
-
-				if (finalMsg === undefined) {
-					vscode.window.showInformationMessage('CommitHub: Cancelled');
-					return;
-				}
-
-				if (!finalMsg.trim()) {
-					vscode.window.showWarningMessage('CommitHub: Empty commit message, aborting');
-					return;
-				}
-
-				exec('git commit -m ' + JSON.stringify(finalMsg), { cwd: workspaceRoot }, (err) => {
-					if (err) {
-						vscode.window.showErrorMessage(`CommitHub: Commit failed — ${err.message}`);
-						return;
+				{
+					const gitExt = vscode.extensions.getExtension('vscode.git');
+					if (gitExt?.exports) {
+						const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
+						const repo = gitApi?.repositories?.[0];
+						if (repo?.inputBox) {
+							repo.inputBox.value = msg;
+							vscode.commands.executeCommand('workbench.view.scm');
+						} else {
+							vscode.window.showErrorMessage('CommitHub: No git repository found');
+						}
+					} else {
+						vscode.window.showErrorMessage('CommitHub: Git extension not available');
 					}
-					vscode.window.showInformationMessage('CommitHub: Committed successfully 🎉');
-				});
+				}
 
 				statusItem.text = '$(check) CommitHub';
 				statusItem.tooltip = 'Connected — click to test';
 			} catch (e: any) {
+				log.error(`[generateCommit] FAILED — ${e.message}`);
 				vscode.window.showErrorMessage(`CommitHub: ${e.message}`);
 				statusItem.text = '$(error) CommitHub';
 				statusItem.tooltip = `Error: ${e.message}`;
@@ -326,7 +349,7 @@ export function activate(context: vscode.ExtensionContext) {
 				{ label: 'OpenAI', description: 'GPT-4o, GPT-4o-mini, o3, o4-mini — $2.50/MTok input' },
 				{ label: 'Anthropic', description: 'Claude Sonnet 4.6, Haiku 4.5, Opus 4.6 — $3/MTok input' },
 				{ label: 'Google Gemini', description: 'Gemini 2.5 Pro, 2.5 Flash — $1.25/MTok input' },
-				{ label: 'Zhipu GLM', description: 'GLM-4, GLM-4V, GLM-4-Plus — Chinese LLM leader' },
+				{ label: 'Zhipu GLM', description: 'GLM-4, GLM-4V, GLM-4-Plus — Chinese LLM leader. Coding Plan → /api/coding/paas/v4' },
 				{ label: 'xAI Grok', description: 'Grok 4.1 Fast, Grok 4 — $0.20/MTok input (cheapest!)' },
 				{ label: 'DeepSeek', description: 'DeepSeek-V4, DeepSeek-R1 — $0.30/MTok input' },
 				{ label: 'Mistral', description: 'Mistral Large, Mistral Small — $2/MTok input' },
@@ -346,6 +369,10 @@ export function activate(context: vscode.ExtensionContext) {
 			const currentUrl = cfg().get('baseUrl', '');
 			if (!currentUrl || currentUrl === 'custom') {
 				await cfg().update('baseUrl', defaultUrl, vscode.ConfigurationTarget.Global);
+			}
+			const defaultModel = providerDefaultModels[id];
+			if (defaultModel) {
+				await cfg().update('model', defaultModel, vscode.ConfigurationTarget.Global);
 			}
 			vscode.window.showInformationMessage(`CommitHub: Provider set to ${pick.label}${defaultUrl ? ` — Base URL: ${defaultUrl}` : ''}`);
 			settingsProvider.refresh();
@@ -408,6 +435,7 @@ export function activate(context: vscode.ExtensionContext) {
 						headers['Authorization'] = `Bearer ${apiKey}`;
 					}
 				}
+				log.info(`[testConnection] GET ${testUrl}`);
 				const mod = testUrl.startsWith('https') ? https : http;
 				await new Promise<void>((resolve, reject) => {
 					const req = mod.get(testUrl!, { headers, timeout: 10000 }, (res) => {
@@ -417,18 +445,22 @@ export function activate(context: vscode.ExtensionContext) {
 							if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
 								resolve();
 							} else {
-								reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 100)}`));
+								const err = `HTTP ${res.statusCode}: ${body.slice(0, 200)}`;
+								log.error(`[testConnection] ${err}`);
+								reject(new Error(err));
 							}
 						});
 					});
-					req.on('error', reject);
-					req.on('timeout', () => { req.destroy(); reject(new Error('timed out')); });
+					req.on('error', (e) => { log.error(`[testConnection] ${e.message}`); reject(e); });
+					req.on('timeout', () => { req.destroy(); log.warn('[testConnection] timed out'); reject(new Error('timed out')); });
 				});
+				log.info('[testConnection] OK');
 				setConnectionStatus('connected');
 				statusItem.text = '$(check) CommitHub';
 				statusItem.tooltip = `Connected to ${provider} — click to retest`;
 				vscode.window.showInformationMessage(`CommitHub: Connected to ${provider}`);
 			} catch (e: any) {
+				log.error(`[testConnection] FAILED — ${e.message}`);
 				setConnectionStatus('failed');
 				statusItem.text = '$(error) CommitHub';
 				statusItem.tooltip = `Disconnected — ${e.message}`;
@@ -535,7 +567,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.setMaxTokens', async () => {
-			await setNumber('CommitHub Max Tokens', 'maxTokens', 500, settingsProvider);
+			await setNumber('CommitHub Max Tokens', 'maxTokens', 2000, settingsProvider);
 		})
 	);
 
@@ -692,6 +724,30 @@ export function activate(context: vscode.ExtensionContext) {
 			if (patterns === undefined) {return;}
 			await cfg().update('excludeFiles', patterns, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(patterns ? 'CommitHub: Exclude patterns saved' : 'CommitHub: Exclude patterns cleared');
+			settingsProvider.refresh();
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('commithub.setConventionalTypes', async () => {
+			const ok = await requireSetup(
+				cfg().get('conventionalCommit', true),
+				'CommitHub Conventional Types',
+				'CommitHub: Enable Conventional Commit first to customize types',
+				'commithub.setConventionalCommit',
+			);
+			if (!ok) {return;}
+			const current = cfg().get('conventionalTypes', '');
+			const types = await vscode.window.showInputBox({
+				title: 'CommitHub Conventional Types',
+				prompt: 'Comma-separated list of allowed conventional commit types',
+				value: current,
+				ignoreFocusOut: true,
+				placeHolder: 'feat, fix, chore, docs, style, refactor, perf, test, ci, build, revert',
+			});
+			if (types === undefined) {return;}
+			await cfg().update('conventionalTypes', types, vscode.ConfigurationTarget.Global);
+			vscode.window.showInformationMessage(types ? 'CommitHub: Conventional types saved' : 'CommitHub: Using default types');
 			settingsProvider.refresh();
 		})
 	);

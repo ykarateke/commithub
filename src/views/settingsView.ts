@@ -51,7 +51,7 @@ const groups: SettingGroup[] = [
 			{ key: 'temperature', label: 'Temperature', icon: 'grabber', command: 'commithub.setTemperature',
 				description: () => String(cfg().get('temperature', 0.7)), prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'maxTokens', label: 'Max Tokens', icon: 'symbol-number', command: 'commithub.setMaxTokens',
-				description: () => String(cfg().get('maxTokens', 500)), prereq: () => ({ ok: true, hint: '' }) },
+				description: () => String(cfg().get('maxTokens', 2000)), prereq: () => ({ ok: true, hint: '' }) },
 		],
 	},
 	{
@@ -76,6 +76,11 @@ const groups: SettingGroup[] = [
 				description: () => String(cfg().get('maxLength', 72)), prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'conventionalCommit', label: 'Conventional Commit', icon: 'check', command: 'commithub.setConventionalCommit',
 				description: () => cfg().get('conventionalCommit', true) ? 'on' : 'off', prereq: () => ({ ok: true, hint: '' }) },
+			{ key: 'conventionalTypes', label: 'Conventional Types', icon: 'symbol-key', command: 'commithub.setConventionalTypes',
+				description: () => {
+					const v = cfg().get<string>('conventionalTypes', '');
+					return v ? v.split(',').length + ' types' : 'default (11)';
+				}, prereq: hasConventionalOn },
 			{ key: 'tone', label: 'Tone', icon: 'symbol-ruler', command: 'commithub.setTone',
 				description: () => cfg().get('tone', 'auto'), prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'includeBody', label: 'Include Body', icon: 'list-tree', command: 'commithub.setIncludeBody',
@@ -129,7 +134,7 @@ export class SettingsProvider implements vscode.TreeDataProvider<vscode.TreeItem
 
 class SettingsGroupItem extends vscode.TreeItem {
 	constructor(readonly group: SettingGroup) {
-		super(group.label, vscode.TreeItemCollapsibleState.Collapsed);
+		super(group.label, vscode.TreeItemCollapsibleState.Expanded);
 		this.iconPath = new vscode.ThemeIcon(group.icon);
 		this.contextValue = 'group';
 	}
