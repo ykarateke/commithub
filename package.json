@@ -18,7 +18,7 @@
         "commithub.provider": {
           "type": "string",
           "default": "openai",
-          "enum": ["openai", "anthropic", "google_gemini", "xai_grok", "deepseek", "mistral", "ollama", "openrouter", "groq", "together"],
+          "enum": ["openai", "anthropic", "google_gemini", "zhipu_glm", "xai_grok", "deepseek", "mistral", "ollama", "openrouter", "groq", "together"],
           "description": "AI provider for commit message generation"
         },
         "commithub.model": {
@@ -131,7 +131,9 @@
       { "command": "commithub.setScopeDetection", "title": "CommitHub: Toggle Scope Detection" },
       { "command": "commithub.setBreakingChanges", "title": "CommitHub: Toggle Breaking Changes Detection" },
       { "command": "commithub.setMaxDiffSize", "title": "CommitHub: Set Max Diff Size" },
-      { "command": "commithub.setExcludeFiles", "title": "CommitHub: Set Exclude Files" }
+      { "command": "commithub.setExcludeFiles", "title": "CommitHub: Set Exclude Files" },
+      { "command": "commithub.testConnection", "title": "CommitHub: Test Connection" },
+      { "command": "commithub.fetchModels", "title": "CommitHub: Fetch Models from API" }
     ],
     "menus": {
       "scm/title": [
@@ -144,25 +146,6 @@
       "view/title": [
         { "command": "commithub.setApiKey", "group": "navigation" },
         { "command": "commithub.setProvider", "group": "navigation" }
-      ],
-      "view/item/context": [
-        { "command": "commithub.setApiKey", "group": "inline" },
-        { "command": "commithub.setProvider", "group": "inline" },
-        { "command": "commithub.setModel", "group": "inline" },
-        { "command": "commithub.setBaseUrl", "group": "inline" },
-        { "command": "commithub.setTemperature", "group": "inline" },
-        { "command": "commithub.setMaxTokens", "group": "inline" },
-        { "command": "commithub.setLanguage", "group": "inline" },
-        { "command": "commithub.setMaxLength", "group": "inline" },
-        { "command": "commithub.setConventionalCommit", "group": "inline" },
-        { "command": "commithub.setIncludeBody", "group": "inline" },
-        { "command": "commithub.setIncludeFooter", "group": "inline" },
-        { "command": "commithub.setEmoji", "group": "inline" },
-        { "command": "commithub.setTone", "group": "inline" },
-        { "command": "commithub.setScopeDetection", "group": "inline" },
-        { "command": "commithub.setBreakingChanges", "group": "inline" },
-        { "command": "commithub.setMaxDiffSize", "group": "inline" },
-        { "command": "commithub.setExcludeFiles", "group": "inline" }
       ]
     },
     "viewsContainers": {
