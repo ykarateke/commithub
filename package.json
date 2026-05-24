@@ -47,7 +47,7 @@
         "commithub.language": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "tr", "en"],
+          "enum": ["auto", "en", "tr", "de", "fr", "es", "pt", "it", "nl", "pl", "ru", "ja", "ko", "zh-CN", "zh-TW", "ar", "hi", "sv", "da", "fi", "nb", "cs", "hu", "ro", "uk", "el", "th", "vi", "bg", "hr", "sk", "sl"],
           "description": "Commit message language"
         },
         "commithub.maxLength": {
@@ -132,6 +132,7 @@
       { "command": "commithub.setBreakingChanges", "title": "CommitHub: Toggle Breaking Changes Detection" },
       { "command": "commithub.setMaxDiffSize", "title": "CommitHub: Set Max Diff Size" },
       { "command": "commithub.setExcludeFiles", "title": "CommitHub: Set Exclude Files" },
+      { "command": "commithub.showStats", "title": "CommitHub: Show Statistics" },
       { "command": "commithub.testConnection", "title": "CommitHub: Test Connection" },
       { "command": "commithub.fetchModels", "title": "CommitHub: Fetch Models from API" }
     ],

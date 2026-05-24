@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { connectionStatus } from '../state';
+import { connectionStatus, stats, getStatsSummary } from '../state';
 
 type PrereqCheck = () => { ok: boolean; hint: string };
 
@@ -59,7 +59,19 @@ const groups: SettingGroup[] = [
 		icon: 'symbol-text',
 		children: [
 			{ key: 'language', label: 'Language', icon: 'globe', command: 'commithub.setLanguage',
-				description: () => cfg().get('language', 'auto'), prereq: () => ({ ok: true, hint: '' }) },
+				description: () => {
+					const m: Record<string, string> = {
+						auto: 'Auto', en: 'English', tr: 'Türkçe', de: 'Deutsch', fr: 'Français',
+						es: 'Español', pt: 'Português', it: 'Italiano', nl: 'Nederlands', pl: 'Polski',
+						ru: 'Русский', ja: '日本語', ko: '한국어', 'zh-CN': '简体中文', 'zh-TW': '繁體中文',
+						ar: 'العربية', hi: 'हिन्दी', sv: 'Svenska', da: 'Dansk', fi: 'Suomi',
+						nb: 'Norsk', cs: 'Čeština', hu: 'Magyar', ro: 'Română', uk: 'Українська',
+						el: 'Ελληνικά', th: 'ไทย', vi: 'Tiếng Việt', bg: 'Български', hr: 'Hrvatski',
+						sk: 'Slovenčina', sl: 'Slovenščina',
+					};
+					const v = cfg().get('language', 'auto');
+					return m[v] || v;
+				}, prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'maxLength', label: 'Max Length', icon: 'symbol-number', command: 'commithub.setMaxLength',
 				description: () => String(cfg().get('maxLength', 72)), prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'conventionalCommit', label: 'Conventional Commit', icon: 'check', command: 'commithub.setConventionalCommit',
@@ -86,6 +98,8 @@ const groups: SettingGroup[] = [
 				description: () => String(cfg().get('maxDiffSize', 8000)), prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'excludeFiles', label: 'Exclude Files', icon: 'exclude', command: 'commithub.setExcludeFiles',
 				description: () => cfg().get('excludeFiles', '') || '—', prereq: () => ({ ok: true, hint: '' }) },
+			{ key: 'statistics', label: 'Statistics', icon: 'graph', command: 'commithub.showStats',
+				description: () => getStatsSummary(), prereq: () => ({ ok: true, hint: '' }) },
 		],
 	},
 ];

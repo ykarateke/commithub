@@ -2,7 +2,10 @@ import * as vscode from 'vscode';
 import { SettingsProvider } from './views/settingsView';
 import * as https from 'https';
 import * as http from 'http';
-import { setConnectionStatus } from './state';
+import { exec } from 'child_process';
+import { setConnectionStatus, recordCall, stats } from './state';
+import { getGitDiff } from './services/git';
+import { generateCommitMessage } from './services/ai';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
@@ -182,21 +185,113 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.generateCommit', async () => {
-			const provider = cfg().get('provider', '');
+			const provider = cfg().get<string>('provider', '');
 			if (!provider) {
 				vscode.window.showWarningMessage('CommitHub: Select a Provider first', 'Open Settings')
 					.then(a => { if (a) { vscode.commands.executeCommand('commithub.setProvider'); }});
 				return;
 			}
-			if (provider !== 'ollama') {
-				const key = await context.secrets.get('commithub.apiKey');
-				if (!key) {
-					vscode.window.showWarningMessage('CommitHub: Set your API Key first', 'Set API Key')
-						.then(a => { if (a) { vscode.commands.executeCommand('commithub.setApiKey'); }});
+			const key = provider === 'ollama' ? '' : (await context.secrets.get('commithub.apiKey'));
+			if (provider !== 'ollama' && !key) {
+				vscode.window.showWarningMessage('CommitHub: Set your API Key first', 'Set API Key')
+					.then(a => { if (a) { vscode.commands.executeCommand('commithub.setApiKey'); }});
+				return;
+			}
+
+			const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+			if (!workspaceRoot) {
+				vscode.window.showErrorMessage('CommitHub: No workspace folder open');
+				return;
+			}
+
+			statusItem.text = '$(sync~spin) generating...';
+			statusItem.tooltip = 'Generating commit message';
+
+			const excludePatterns = cfg().get<string>('excludeFiles', '')
+				.split(',')
+				.map(s => s.trim())
+				.filter(Boolean);
+
+			try {
+				const git = await getGitDiff(workspaceRoot, excludePatterns);
+				if (!git.diff) {
+					vscode.window.showInformationMessage('CommitHub: No changes detected to commit');
+					statusItem.text = '$(plug) CommitHub';
+					statusItem.tooltip = 'Click to test connection';
 					return;
 				}
+
+				const maxSize = cfg().get('maxDiffSize', 8000);
+				const diff = git.diff.length > maxSize
+					? git.diff.slice(0, maxSize) + '\n... (truncated)'
+					: git.diff;
+
+				const model = cfg().get<string>('model', 'gpt-4o');
+				const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
+
+				const t0 = Date.now();
+				const result = await generateCommitMessage(provider, baseUrl, model, key || undefined, {
+					diff,
+					stats: git.stats,
+					files: git.files,
+					language: cfg().get<string>('language', 'auto'),
+					maxLength: cfg().get('maxLength', 72),
+					conventionalCommit: cfg().get('conventionalCommit', true),
+					includeBody: cfg().get('includeBody', true),
+					includeFooter: cfg().get('includeFooter', false),
+					emoji: cfg().get('emoji', false),
+					tone: cfg().get<string>('tone', 'auto'),
+					scopeDetection: cfg().get('scopeDetection', true),
+					breakingChanges: cfg().get('breakingChanges', true),
+				});
+				const durationMs = Date.now() - t0;
+				recordCall({
+					provider,
+					model,
+					inputTokens: result.usage.inputTokens,
+					outputTokens: result.usage.outputTokens,
+					durationMs,
+				});
+
+				const msg = result.text;
+				if (!msg) {
+					vscode.window.showErrorMessage('CommitHub: AI returned an empty response');
+					return;
+				}
+
+				const finalMsg = await vscode.window.showInputBox({
+					title: 'CommitHub — Review & Edit Commit Message',
+					value: msg,
+					prompt: 'Edit the commit message then press Enter to commit, or ESC to cancel.',
+					ignoreFocusOut: true,
+					placeHolder: msg,
+				});
+
+				if (finalMsg === undefined) {
+					vscode.window.showInformationMessage('CommitHub: Cancelled');
+					return;
+				}
+
+				if (!finalMsg.trim()) {
+					vscode.window.showWarningMessage('CommitHub: Empty commit message, aborting');
+					return;
+				}
+
+				exec('git commit -m ' + JSON.stringify(finalMsg), { cwd: workspaceRoot }, (err) => {
+					if (err) {
+						vscode.window.showErrorMessage(`CommitHub: Commit failed — ${err.message}`);
+						return;
+					}
+					vscode.window.showInformationMessage('CommitHub: Committed successfully 🎉');
+				});
+
+				statusItem.text = '$(check) CommitHub';
+				statusItem.tooltip = 'Connected — click to test';
+			} catch (e: any) {
+				vscode.window.showErrorMessage(`CommitHub: ${e.message}`);
+				statusItem.text = '$(error) CommitHub';
+				statusItem.tooltip = `Error: ${e.message}`;
 			}
-			vscode.window.showInformationMessage('CommitHub: Generating commit message...');
 		})
 	);
 
@@ -449,15 +544,52 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.setLanguage', async () => {
 			const current = cfg().get('language', 'auto');
-			const map = new Map([['auto', 'Auto'], ['tr', 'Turkish'], ['en', 'English']]);
-			const pick = await vscode.window.showQuickPick(
-				['Auto', 'Turkish', 'English'].filter(l => l !== map.get(current)),
-				{ title: 'CommitHub Language', placeHolder: `Current: ${map.get(current)}` }
-			);
+			const langs = [
+				{ id: 'auto', label: 'Auto', desc: 'Let AI decide based on codebase' },
+				{ id: 'en', label: 'English' },
+				{ id: 'tr', label: 'Türkçe (Turkish)' },
+				{ id: 'de', label: 'Deutsch (German)' },
+				{ id: 'fr', label: 'Français (French)' },
+				{ id: 'es', label: 'Español (Spanish)' },
+				{ id: 'pt', label: 'Português (Portuguese)' },
+				{ id: 'it', label: 'Italiano (Italian)' },
+				{ id: 'nl', label: 'Nederlands (Dutch)' },
+				{ id: 'pl', label: 'Polski (Polish)' },
+				{ id: 'ru', label: 'Русский (Russian)' },
+				{ id: 'ja', label: '日本語 (Japanese)' },
+				{ id: 'ko', label: '한국어 (Korean)' },
+				{ id: 'zh-CN', label: '简体中文 (Chinese Simplified)' },
+				{ id: 'zh-TW', label: '繁體中文 (Chinese Traditional)' },
+				{ id: 'ar', label: 'العربية (Arabic)' },
+				{ id: 'hi', label: 'हिन्दी (Hindi)' },
+				{ id: 'sv', label: 'Svenska (Swedish)' },
+				{ id: 'da', label: 'Dansk (Danish)' },
+				{ id: 'fi', label: 'Suomi (Finnish)' },
+				{ id: 'nb', label: 'Norsk (Norwegian)' },
+				{ id: 'cs', label: 'Čeština (Czech)' },
+				{ id: 'hu', label: 'Magyar (Hungarian)' },
+				{ id: 'ro', label: 'Română (Romanian)' },
+				{ id: 'uk', label: 'Українська (Ukrainian)' },
+				{ id: 'el', label: 'Ελληνικά (Greek)' },
+				{ id: 'th', label: 'ไทย (Thai)' },
+				{ id: 'vi', label: 'Tiếng Việt (Vietnamese)' },
+				{ id: 'bg', label: 'Български (Bulgarian)' },
+				{ id: 'hr', label: 'Hrvatski (Croatian)' },
+				{ id: 'sk', label: 'Slovenčina (Slovak)' },
+				{ id: 'sl', label: 'Slovenščina (Slovenian)' },
+			];
+			const items = langs.map(l => ({
+				label: l.label,
+				description: l.id === 'auto' ? l.desc : l.id,
+			}));
+			const pick = await vscode.window.showQuickPick(items, {
+				title: 'CommitHub Language',
+				placeHolder: `Current: ${langs.find(l => l.id === current)?.label || current}`,
+			});
 			if (!pick) {return;}
-			const val = pick === 'Auto' ? 'auto' : pick === 'Turkish' ? 'tr' : 'en';
-			await cfg().update('language', val, vscode.ConfigurationTarget.Global);
-			vscode.window.showInformationMessage(`CommitHub: Language set to ${pick}`);
+			const found = langs.find(l => l.label === pick.label);
+			await cfg().update('language', found?.id || 'auto', vscode.ConfigurationTarget.Global);
+			vscode.window.showInformationMessage(`CommitHub: Language set to ${pick.label}`);
 			settingsProvider.refresh();
 		})
 	);
@@ -561,6 +693,30 @@ export function activate(context: vscode.ExtensionContext) {
 			await cfg().update('excludeFiles', patterns, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(patterns ? 'CommitHub: Exclude patterns saved' : 'CommitHub: Exclude patterns cleared');
 			settingsProvider.refresh();
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('commithub.showStats', () => {
+			const s = stats;
+			if (!s.totalCalls) {
+				vscode.window.showInformationMessage('CommitHub: No API calls made yet. Generate a commit first.');
+				return;
+			}
+			const lines = [
+				`Total API calls:  ${s.totalCalls}`,
+				`Total input tokens:  ${s.totalInputTokens.toLocaleString()}`,
+				`Total output tokens: ${s.totalOutputTokens.toLocaleString()}`,
+				`Total tokens:        ${(s.totalInputTokens + s.totalOutputTokens).toLocaleString()}`,
+				`──────────────────────────`,
+				`Last call:`,
+				`  Provider:  ${s.lastProvider}`,
+				`  Model:     ${s.lastModel}`,
+				`  Input:     ${s.lastInputTokens.toLocaleString()} tokens`,
+				`  Output:    ${s.lastOutputTokens.toLocaleString()} tokens`,
+				`  Duration:  ${s.lastDurationMs}ms`,
+			];
+			vscode.window.showInformationMessage('CommitHub Statistics', { modal: true, detail: lines.join('\n') });
 		})
 	);
 }
