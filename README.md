@@ -29,6 +29,9 @@ Generate conventional commit messages from your staged changes with a single cli
 - **Debug channel** — dedicated Output Channel logs all API requests and responses
 - **Model discovery** — fetch available models directly from your provider's API
 - **Custom Base URL** — supports any OpenAI-compatible endpoint
+- **Cancellable** — progress notification with Cancel button for long-running requests
+- **Untracked files** — new (untracked) files are included in the diff sent to the AI
+- **Auto-start** — activates on VS Code startup, status bar ready immediately
 
 ## Getting Started
 
@@ -164,10 +167,11 @@ src/
 ```
 
 - **Dual compiler**: Extension built with webpack, tests with `tsc`
-- `vscode`, `https`, `http`, `child_process` are externalized in webpack config
+- `vscode`, `https`, `http`, `child_process`, `fs` are externalized in webpack config
 - API keys stored in `SecretStorage` (never written to settings.json)
 - Statistics persisted in `context.globalState` across sessions
 - All API calls use Node.js `https` module (bypasses extension host `fetch` proxy issues)
+- HTTP requests are cancellable via `AbortController` wired to VS Code `CancellationToken`
 
 ## License
 
