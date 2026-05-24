@@ -18,13 +18,31 @@
         "commithub.provider": {
           "type": "string",
           "default": "openai",
-          "enum": ["openai", "anthropic", "ollama"],
+          "enum": ["openai", "anthropic", "google_gemini", "xai_grok", "deepseek", "mistral", "ollama", "openrouter", "groq", "together"],
           "description": "AI provider for commit message generation"
         },
         "commithub.model": {
           "type": "string",
           "default": "gpt-4o",
-          "description": "AI model name"
+          "description": "AI model name (see provider documentation)"
+        },
+        "commithub.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Custom API base URL (leave empty for provider default)"
+        },
+        "commithub.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "AI temperature (0=deterministic, 2=creative)"
+        },
+        "commithub.maxTokens": {
+          "type": "number",
+          "default": 500,
+          "minimum": 50,
+          "description": "Maximum tokens for AI response"
         },
         "commithub.language": {
           "type": "string",
@@ -35,12 +53,55 @@
         "commithub.maxLength": {
           "type": "number",
           "default": 72,
-          "description": "Maximum commit message length"
+          "minimum": 20,
+          "description": "Maximum commit subject line length"
         },
         "commithub.conventionalCommit": {
           "type": "boolean",
           "default": true,
-          "description": "Use Conventional Commits format"
+          "description": "Use Conventional Commits format (feat:, fix:, etc.)"
+        },
+        "commithub.includeBody": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include detailed body in commit message"
+        },
+        "commithub.includeFooter": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include footer (breaking changes, issue refs)"
+        },
+        "commithub.emoji": {
+          "type": "boolean",
+          "default": false,
+          "description": "Add emoji prefix to commit messages"
+        },
+        "commithub.tone": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "formal", "casual", "technical"],
+          "description": "Commit message tone"
+        },
+        "commithub.scopeDetection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-detect commit scope from file paths"
+        },
+        "commithub.breakingChanges": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-detect breaking API changes"
+        },
+        "commithub.maxDiffSize": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 1000,
+          "description": "Truncate diff to this many characters before sending to AI"
+        },
+        "commithub.excludeFiles": {
+          "type": "string",
+          "default": "",
+          "description": "Comma-separated glob patterns to exclude from diff analysis"
         }
       }
     },
@@ -54,22 +115,23 @@
         "title": "CommitHub: Generate Commit Message",
         "icon": "images/commithub-sparkle.svg"
       },
-      {
-        "command": "commithub.setApiKey",
-        "title": "CommitHub: Set API Key"
-      },
-      {
-        "command": "commithub.setProvider",
-        "title": "CommitHub: Set AI Provider"
-      },
-      {
-        "command": "commithub.setModel",
-        "title": "CommitHub: Set Model"
-      },
-      {
-        "command": "commithub.setLanguage",
-        "title": "CommitHub: Set Language"
-      }
+      { "command": "commithub.setApiKey", "title": "CommitHub: Set API Key" },
+      { "command": "commithub.setProvider", "title": "CommitHub: Set AI Provider" },
+      { "command": "commithub.setModel", "title": "CommitHub: Set Model" },
+      { "command": "commithub.setBaseUrl", "title": "CommitHub: Set Base URL" },
+      { "command": "commithub.setTemperature", "title": "CommitHub: Set Temperature" },
+      { "command": "commithub.setMaxTokens", "title": "CommitHub: Set Max Tokens" },
+      { "command": "commithub.setLanguage", "title": "CommitHub: Set Language" },
+      { "command": "commithub.setMaxLength", "title": "CommitHub: Set Max Length" },
+      { "command": "commithub.setConventionalCommit", "title": "CommitHub: Toggle Conventional Commits" },
+      { "command": "commithub.setIncludeBody", "title": "CommitHub: Toggle Include Body" },
+      { "command": "commithub.setIncludeFooter", "title": "CommitHub: Toggle Include Footer" },
+      { "command": "commithub.setEmoji", "title": "CommitHub: Toggle Emoji" },
+      { "command": "commithub.setTone", "title": "CommitHub: Set Message Tone" },
+      { "command": "commithub.setScopeDetection", "title": "CommitHub: Toggle Scope Detection" },
+      { "command": "commithub.setBreakingChanges", "title": "CommitHub: Toggle Breaking Changes Detection" },
+      { "command": "commithub.setMaxDiffSize", "title": "CommitHub: Set Max Diff Size" },
+      { "command": "commithub.setExcludeFiles", "title": "CommitHub: Set Exclude Files" }
     ],
     "menus": {
       "scm/title": [
@@ -80,32 +142,27 @@
         }
       ],
       "view/title": [
-        {
-          "command": "commithub.setApiKey",
-          "group": "navigation"
-        },
-        {
-          "command": "commithub.setProvider",
-          "group": "navigation"
-        }
+        { "command": "commithub.setApiKey", "group": "navigation" },
+        { "command": "commithub.setProvider", "group": "navigation" }
       ],
       "view/item/context": [
-        {
-          "command": "commithub.setApiKey",
-          "group": "inline"
-        },
-        {
-          "command": "commithub.setProvider",
-          "group": "inline"
-        },
-        {
-          "command": "commithub.setModel",
-          "group": "inline"
-        },
-        {
-          "command": "commithub.setLanguage",
-          "group": "inline"
-        }
+        { "command": "commithub.setApiKey", "group": "inline" },
+        { "command": "commithub.setProvider", "group": "inline" },
+        { "command": "commithub.setModel", "group": "inline" },
+        { "command": "commithub.setBaseUrl", "group": "inline" },
+        { "command": "commithub.setTemperature", "group": "inline" },
+        { "command": "commithub.setMaxTokens", "group": "inline" },
+        { "command": "commithub.setLanguage", "group": "inline" },
+        { "command": "commithub.setMaxLength", "group": "inline" },
+        { "command": "commithub.setConventionalCommit", "group": "inline" },
+        { "command": "commithub.setIncludeBody", "group": "inline" },
+        { "command": "commithub.setIncludeFooter", "group": "inline" },
+        { "command": "commithub.setEmoji", "group": "inline" },
+        { "command": "commithub.setTone", "group": "inline" },
+        { "command": "commithub.setScopeDetection", "group": "inline" },
+        { "command": "commithub.setBreakingChanges", "group": "inline" },
+        { "command": "commithub.setMaxDiffSize", "group": "inline" },
+        { "command": "commithub.setExcludeFiles", "group": "inline" }
       ]
     },
     "viewsContainers": {

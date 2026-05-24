@@ -11,7 +11,7 @@ VS Code extension that generates conventional commit messages from git diffs usi
 | `commithub.helloWorld` | Hello World | — | — |
 | `commithub.generateCommit` | CommitHub: Generate Commit Message | ✅ `scm/title` | — |
 
-The SCM title button uses VS Code's built-in `sparkle` codicon (via `SourceControl.actionButton` with `ThemeIcon`) and appears in the Source Control view title bar.
+The SCM title button uses `images/commithub-sparkle.svg` as icon and appears in the Source Control view title bar when git is active.
 The activity bar icon uses `images/commithub-sparkle.svg` — click it to open the CommitHub sidebar with settings (API key, provider, model, language).
 
 ## Commands
@@ -49,11 +49,14 @@ The activity bar icon uses `images/commithub-sparkle.svg` — click it to open t
 - Pre-launch task is `npm: watch` (webpack watch).
 - Extension output appears in the debug console.
 
-## Future direction (from `docs/PRD.md`)
+## Settings sidebar (`commithub.settingsView`)
 
-- AI providers: OpenAI, Anthropic, local Ollama.
-- API keys stored in `vscode.SecretStorage`.
-- Per-project config via `.commithub.json`.
-- `git diff --cached` via `child_process`.
-- Conventional Commits prefix detection.
-- Turkish / English language detection from project config.
+Hierarchical tree view with three groups. Each setting opens an InputBox or QuickPick.
+
+| Group | Settings |
+|---|---|
+| **Provider** | API Key, Provider (10 providers), Model, Base URL, Temperature, Max Tokens |
+| **Message** | Language, Max Length, Conventional Commit, Body, Footer, Emoji, Tone |
+| **Analysis** | Scope Detection, Breaking Changes, Max Diff Size, Exclude Files |
+
+All stored in VS Code `ConfigurationTarget.Global` (or `SecretStorage` for API key).
