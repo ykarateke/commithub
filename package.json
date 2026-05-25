@@ -3,6 +3,7 @@
   "displayName": "CommitHub",
   "description": "AI-powered Git commit message generator.",
   "version": "1.0.0",
+  "publisher": "YasinKarateke",
   "repository": {
     "type": "git",
     "url": "https://github.com/ykarateke/commithub.git"
