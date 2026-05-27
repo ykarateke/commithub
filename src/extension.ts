@@ -4,7 +4,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { setConnectionStatus, recordCall, stats, initState } from './state';
 import { getGitDiff } from './services/git';
-import { generateCommitMessage } from './services/ai';
+import { generateCommitMessage, streamCommitMessage, CommitUsage } from './services/ai';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
@@ -35,6 +35,16 @@ function httpGetJson(url: string, headers: Record<string, string>): Promise<any>
 		req.on('error', reject);
 		req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timed out')); });
 	});
+}
+
+function setInputBoxValue(value: string): void {
+	try {
+		const gitExt = vscode.extensions.getExtension('vscode.git');
+		if (!gitExt?.exports) return;
+		const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
+		const repo = gitApi?.repositories?.[0];
+		if (repo?.inputBox) repo.inputBox.value = value;
+	} catch { /* ignore */ }
 }
 
 const providerBaseUrls: Record<string, string> = {
@@ -245,7 +255,7 @@ export function activate(context: vscode.ExtensionContext) {
 						return;
 					}
 
-					const maxSize = cfg().get('maxDiffSize', 8000);
+					const maxSize = cfg().get('maxDiffSize', 3000);
 					const diff = git.diff.length > maxSize
 						? git.diff.slice(0, maxSize) + '\n... (truncated)'
 						: git.diff;
@@ -257,8 +267,8 @@ export function activate(context: vscode.ExtensionContext) {
 					const rawTypes = cfg().get<string>('conventionalTypes', '');
 					const abort = new AbortController();
 					token.onCancellationRequested(() => abort.abort());
-					const t0 = Date.now();
-					const result = await generateCommitMessage(provider, baseUrl, model, key || undefined, {
+
+					const settings = {
 						diff,
 						stats: git.stats,
 						files: git.files,
@@ -274,41 +284,50 @@ export function activate(context: vscode.ExtensionContext) {
 						temperature: cfg().get('temperature', 0.7),
 						maxTokens: cfg().get('maxTokens', 2000),
 						conventionalTypes: rawTypes ? rawTypes.split(',').map(s => s.trim()).filter(Boolean) : [],
-					}, abort.signal);
-					const durationMs = Date.now() - t0;
-					log.info(`[generateCommit] OK — ${result.usage.inputTokens}in ${result.usage.outputTokens}out ${durationMs}ms`);
-					recordCall({
-						provider,
-						model,
-						inputTokens: result.usage.inputTokens,
-						outputTokens: result.usage.outputTokens,
-						durationMs,
-					});
+					};
 
-					const msg = result.text;
-					if (!msg) {
-						const hint = result.finishReason === 'length'
-							? ' — model ran out of tokens. Increase Max Tokens in settings.'
-							: '';
-						vscode.window.showErrorMessage(`CommitHub: AI returned an empty response${hint}`);
+					const iterator = streamCommitMessage(provider, baseUrl, model, key || undefined, settings, abort.signal);
+					let fullText = '';
+					let hasFirstChunk = false;
+					let t0 = Date.now();
+					let iterResult = await iterator.next();
+
+					while (!iterResult.done) {
+						const chunk: string = iterResult.value as any;
+						fullText += chunk;
+						if (!hasFirstChunk) {
+							hasFirstChunk = true;
+							progress.report({ message: '✍️ Writing commit message...' });
+							setInputBoxValue(fullText);
+						} else {
+							setInputBoxValue(fullText);
+						}
+						iterResult = await iterator.next();
+					}
+
+					const returnVal = iterResult.value as { text: string; usage: CommitUsage; finishReason: string } | undefined;
+					const finalText = returnVal?.text || fullText.trim();
+
+					if (!hasFirstChunk && !finalText) {
+						vscode.window.showErrorMessage('CommitHub: AI returned an empty response');
 						return;
 					}
 
-					{
-						const gitExt = vscode.extensions.getExtension('vscode.git');
-						if (gitExt?.exports) {
-							const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
-							const repo = gitApi?.repositories?.[0];
-							if (repo?.inputBox) {
-								repo.inputBox.value = msg;
-								vscode.commands.executeCommand('workbench.view.scm');
-							} else {
-								vscode.window.showErrorMessage('CommitHub: No git repository found');
-							}
-						} else {
-							vscode.window.showErrorMessage('CommitHub: Git extension not available');
-						}
+					if (!hasFirstChunk) {
+						setInputBoxValue(finalText);
 					}
+
+					if (returnVal) {
+						recordCall({
+							provider,
+							model,
+							inputTokens: returnVal.usage.inputTokens,
+							outputTokens: returnVal.usage.outputTokens,
+							durationMs: Date.now() - t0,
+						});
+					}
+
+					vscode.commands.executeCommand('workbench.view.scm');
 
 					statusItem.text = '$(check) CommitHub';
 					statusItem.tooltip = 'Connected — click to test';

@@ -98,11 +98,10 @@ function postJson(url: string, body: any, headers: Record<string, string>, timeo
 		const options = {
 			hostname: urlObj.hostname,
 			port: urlObj.port,
-			path: urlObj.pathname,
+			path: urlObj.pathname + urlObj.search,
 			method: 'POST',
 			headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
 			timeout,
-			signal,
 		};
 		const req = mod.request(options, (res) => {
 			const chunks: Buffer[] = [];
@@ -110,15 +109,11 @@ function postJson(url: string, body: any, headers: Record<string, string>, timeo
 			res.on('end', () => {
 				const bodyText = Buffer.concat(chunks).toString();
 				if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-					console.error(`[CommitHub AI] HTTP ${res.statusCode}: ${bodyText.slice(0, 500)}`);
 					reject(new Error(`HTTP ${res.statusCode}: ${bodyText.slice(0, 200)}`));
 					return;
 				}
 				try { resolve(JSON.parse(bodyText)); }
-				catch {
-					console.error(`[CommitHub AI] Invalid JSON: ${bodyText.slice(0, 500)}`);
-					reject(new Error(`Invalid JSON: ${bodyText.slice(0, 200)}`));
-				}
+				catch { reject(new Error(`Invalid JSON: ${bodyText.slice(0, 200)}`)); }
 			});
 		});
 		req.on('error', (e) => {
@@ -132,6 +127,64 @@ function postJson(url: string, body: any, headers: Record<string, string>, timeo
 		req.write(data);
 		req.end();
 	});
+}
+
+async function* streamPostJson(url: string, body: any, headers: Record<string, string>, signal?: AbortSignal): AsyncGenerator<string, void, undefined> {
+	const mod = url.startsWith('https') ? https : http;
+	const data = JSON.stringify(body);
+	const urlObj = new URL(url);
+	const options = {
+		hostname: urlObj.hostname,
+		port: urlObj.port,
+		path: urlObj.pathname + urlObj.search,
+		method: 'POST',
+		headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+		timeout: 120000,
+	};
+
+	let finished = false;
+	let cancelled = false;
+	if (signal) {
+		signal.addEventListener('abort', () => { cancelled = true; }, { once: true });
+	}
+
+	const stream = await new Promise<http.IncomingMessage>((resolve, reject) => {
+		const req = mod.request(options, (res) => { resolve(res); });
+		req.on('error', (e) => { if (e.name === 'AbortError') { reject(new Error('Canceled')); } else { reject(e); } });
+		req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+		if (signal) { signal.addEventListener('abort', () => { req.destroy(); }, { once: true }); }
+		req.write(data);
+		req.end();
+	});
+
+	if (!stream.statusCode || stream.statusCode < 200 || stream.statusCode >= 300) {
+		const errBody = await new Promise<string>(resolve => {
+			const parts: Buffer[] = [];
+			stream.on('data', (c: Buffer) => parts.push(c));
+			stream.on('end', () => resolve(Buffer.concat(parts).toString()));
+		});
+		throw new Error(`HTTP ${stream.statusCode}: ${errBody.slice(0, 200)}`);
+	}
+
+	let buffer = '';
+	for await (const chunk of stream) {
+		if (cancelled) break;
+		buffer += chunk.toString();
+		const lines = buffer.split('\n');
+		buffer = lines.pop() || '';
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (!trimmed || !trimmed.startsWith('data:')) continue;
+			const json = trimmed.slice(5).trim();
+			if (json === '[DONE]') { finished = true; break; }
+			try {
+				const parsed = JSON.parse(json);
+				const content = parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.text || '';
+				if (content) yield content;
+			} catch { /* skip malformed chunk */ }
+		}
+		if (finished) break;
+	}
 }
 
 export interface CommitUsage {
@@ -215,4 +268,45 @@ export async function generateCommitMessage(
 		if (e.message === 'Canceled') { throw e; }
 		throw new Error(`AI request failed: ${e.message}`);
 	}
+}
+
+export async function* streamCommitMessage(
+	provider: string,
+	baseUrl: string,
+	model: string,
+	apiKey: string | undefined,
+	settings: CommitSettings,
+	signal?: AbortSignal,
+): AsyncGenerator<string, { text: string; usage: CommitUsage; finishReason: string }, undefined> {
+	const prompt = buildPrompt(settings);
+	const config = provider === 'anthropic' ? 'anthropic' : provider === 'google_gemini' ? 'gemini' : 'openai';
+
+	if (config !== 'openai') {
+		const result = await generateCommitMessage(provider, baseUrl, model, apiKey, settings, signal);
+		yield result.text;
+		return result;
+	}
+
+	const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+	const body = {
+		model,
+		messages: [
+			{ role: 'system', content: prompt },
+			{ role: 'user', content: 'Generate the commit message now.' },
+		],
+		temperature: settings.temperature,
+		max_tokens: settings.maxTokens,
+		stream: true,
+		stream_options: { include_usage: true },
+	};
+	const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey || ''}` };
+
+	let fullText = '';
+
+	for await (const chunk of streamPostJson(url, body, headers, signal)) {
+		fullText += chunk;
+		yield chunk;
+	}
+
+	return { text: fullText.trim(), usage: { inputTokens: 0, outputTokens: 0 }, finishReason: '' };
 }
