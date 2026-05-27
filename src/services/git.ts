@@ -1,6 +1,5 @@
 import { exec } from 'child_process';
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 
 export interface HunkInfo {
   header: string;
@@ -37,9 +36,13 @@ const AUTO_EXCLUDE_DEFAULTS = [
   '*.min.js', '*.min.css', '*.bundle.js',
 ];
 
+let diffCache: { key: string; result: GitDiffResult } | undefined;
+
+let _cachedRoot: string = '';
+
 function execCmd(cmd: string, cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    exec(cmd, { cwd, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
       if (err) { reject(err); return; }
       resolve(stdout);
     });
@@ -123,6 +126,10 @@ function buildExcludeArgs(
   return ' -- ' + patterns.map(p => `':(exclude)${p}'`).join(' ');
 }
 
+function buildCacheKey(root: string): Promise<string> {
+  return execCmd('git status --porcelain -u', root).then(out => out.trim()).catch(() => '');
+}
+
 export async function getGitDiff(
   _cwd: string,
   userExcludePatterns: string[] = [],
@@ -137,63 +144,56 @@ export async function getGitDiff(
   const root = repoInfo.root;
   const excludeArgs = buildExcludeArgs(userExcludePatterns, includeAutoExcludes);
 
+  const cacheKey = await buildCacheKey(root);
+  if (diffCache && diffCache.key === cacheKey && _cachedRoot === root) {
+    return diffCache.result;
+  }
+
+  const diffArgs = '-U2';
+
   const [trackedDiff, untrackedRaw] = await Promise.all([
-    execCmd(`git diff HEAD${excludeArgs}`, root).catch(() => ''),
+    execCmd(`git diff HEAD ${diffArgs}${excludeArgs}`, root).catch(() => ''),
     execCmd(`git ls-files --others --exclude-standard${excludeArgs}`, root),
   ]);
 
-  let trackedFiles = parseDiffOutput(trackedDiff);
+  const trackedFiles = parseDiffOutput(trackedDiff);
 
   const untrackedFileList = untrackedRaw.split('\n').filter(Boolean);
-  const untrackedFiles: FileDiff[] = [];
 
-  for (const f of untrackedFileList) {
-    const fullPath = `${root}/${f}`;
-    try {
-      const content = fs.readFileSync(fullPath, 'utf-8');
-      const lines = content.split('\n');
-      const isTruncated = lines.length > untrackedMaxLines;
-      const truncatedLines = isTruncated ? lines.slice(0, untrackedMaxLines) : lines;
-      const truncatedContent = truncatedLines.join('\n');
+  const lineCounts = await Promise.all(
+    untrackedFileList.map(f =>
+      execCmd(`wc -l < "${f}"`, root)
+        .then(c => ({ file: f, lines: parseInt(c.trim(), 10) || 0 }))
+        .catch(() => ({ file: f, lines: 0 }))
+    )
+  );
 
-      const hunkHeader = `@@ -0,0 +1,${truncatedLines.length} @@`;
-      const rawDiff = `diff --git a/${f} b/${f}\nnew file mode 100644\nindex 0000000..0000000\n--- /dev/null\n+++ b/${f}\n${hunkHeader}\n${truncatedLines.map(l => '+' + l).join('\n')}`;
+  const totalAdded = trackedFiles.reduce((s, f) => s + f.addedLines, 0);
+  const totalRemoved = trackedFiles.reduce((s, f) => s + f.removedLines, 0);
 
-      untrackedFiles.push({
-        filePath: f,
-        status: 'added',
-        addedLines: truncatedLines.length,
-        removedLines: 0,
-        hunks: [{
-          header: hunkHeader,
-          content: rawDiff,
-          funcName: '',
-          addedLines: truncatedLines.length,
-          removedLines: 0,
-        }],
-        rawDiff,
-        isTruncated,
-      });
-    } catch { /* skip unreadable */ }
-  }
+  const untrackedPaths = lineCounts.map(lc => {
+    const truncated = lc.lines > untrackedMaxLines;
+    return `${lc.file} (${Math.min(lc.lines, untrackedMaxLines)} line${lc.lines > 1 ? 's' : ''}${truncated ? ', truncated' : ''})`;
+  });
 
-  const allFiles = [...trackedFiles, ...untrackedFiles];
-
-  const totalAdded = allFiles.reduce((s, f) => s + f.addedLines, 0);
-  const totalRemoved = allFiles.reduce((s, f) => s + f.removedLines, 0);
-
-  const untrackedPaths = untrackedFiles.map(f => f.filePath);
   const summaryStats = [
     trackedFiles.length ? `modified: ${trackedFiles.length} file(s), +${totalAdded}/-${totalRemoved}` : '',
-    untrackedFiles.length ? `new: ${untrackedPaths.join(', ')}` : '',
+    untrackedPaths.length ? `new: ${untrackedPaths.join(', ')}` : '',
   ].filter(Boolean).join('\n');
 
-  return {
-    files: allFiles,
-    hasChanges: allFiles.length > 0,
+  const result: GitDiffResult = {
+    files: trackedFiles,
+    hasChanges: trackedFiles.length > 0 || untrackedFileList.length > 0,
     totalAdded,
     totalRemoved,
     summaryStats,
-    allFilePaths: [...trackedFiles.map(f => f.filePath), ...untrackedPaths],
+    allFilePaths: [trackedFiles.map(f => f.filePath), ...untrackedFileList].flat(),
   };
+
+  if (cacheKey) {
+    diffCache = { key: cacheKey, result };
+    _cachedRoot = root;
+  }
+
+  return result;
 }

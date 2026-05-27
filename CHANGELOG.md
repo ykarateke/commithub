@@ -4,6 +4,16 @@ All notable changes to the "commithub" extension will be documented in this file
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.2.0] - 2026-05-27
+
+### Performance
+- Untracked files: no longer read file contents — uses `wc -l` for line counts (async, parallel)
+- Git diff: reduced context lines (`-U2`) for smaller diffs
+- Prompt template: shortened instructions (~40% fewer tokens)
+- In-memory diff cache: repeated generations on unchanged state use cached result
+- `maxBuffer` increased to 10MB for large diffs
+- Removed `fs` dependency from git service (untracked files are stat-only)
+
 ## [1.1.1] - 2026-05-27
 
 ### Fixed

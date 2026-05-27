@@ -38,20 +38,9 @@ const toneNames: Record<string, string> = {
   technical: 'precise and code-focused, use technical terminology',
 };
 
-function buildFileSummary(files: FileDiff[], maxChars: number): string {
-  const lines: string[] = [];
-  for (const f of files) {
-    const funcs = f.hunks.map(h => h.funcName).filter(Boolean);
-    const funcStr = funcs.length ? ` | ${[...new Set(funcs)].join(', ')}` : '';
-    const truncFlag = f.isTruncated ? ' [truncated]' : '';
-    const line = `${f.filePath} | +${f.addedLines}/-${f.removedLines}${funcStr}${truncFlag}`;
-    if (lines.join('\n').length + line.length + 1 > maxChars) break;
-    lines.push(line);
-  }
-  return lines.join('\n');
-}
-
 function buildDiffSection(files: FileDiff[], maxDiffSize: number): string {
+  if (!files.length) return '(no tracked changes — see new files above)';
+
   const totalSize = files.reduce((s, f) => s + f.rawDiff.length, 0);
 
   if (totalSize <= maxDiffSize) {
@@ -62,94 +51,71 @@ function buildDiffSection(files: FileDiff[], maxDiffSize: number): string {
   const excessFactor = totalSize / maxDiffSize;
 
   if (excessFactor >= 2 || fileCount > 20) {
-    return buildFileSummary(files, maxDiffSize);
+    return files.map(f => {
+      const funcs = [...new Set(f.hunks.map(h => h.funcName).filter(Boolean))];
+      const funcStr = funcs.length ? ` (${funcs.join(', ')})` : '';
+      const truncFlag = f.isTruncated ? ' [truncated]' : '';
+      return `${f.filePath} | +${f.addedLines}/-${f.removedLines}${funcStr}${truncFlag}`;
+    }).join('\n');
   }
 
-  const includedDiffs: string[] = [];
-  const skipped: FileDiff[] = [];
   let budget = maxDiffSize;
+  const included = files.filter(f => {
+    if (f.rawDiff.length <= budget) { budget -= f.rawDiff.length; return true; }
+    return false;
+  });
+  const skipped = files.filter(f => !included.includes(f));
 
-  for (const f of files) {
-    if (f.rawDiff.length <= budget) {
-      includedDiffs.push(f.rawDiff);
-      budget -= f.rawDiff.length;
-    } else {
-      skipped.push(f);
-    }
-  }
+  if (!skipped.length) return included.map(f => f.rawDiff).join('\n');
 
-  if (skipped.length === 0) {
-    return includedDiffs.join('\n');
-  }
-
-  const summary = [
-    includedDiffs.join('\n'),
+  return [
+    included.map(f => f.rawDiff).join('\n'),
     '',
     '# Additional changed files (full diff omitted)',
     ...skipped.map(f => {
-      const funcs = f.hunks.map(h => h.funcName).filter(Boolean);
-      const funcStr = funcs.length ? ` | ${[...new Set(funcs)].join(', ')}` : '';
+      const funcs = [...new Set(f.hunks.map(h => h.funcName).filter(Boolean))];
+      const funcStr = funcs.length ? ` (${funcs.join(', ')})` : '';
       return `# ${f.filePath} | +${f.addedLines}/-${f.removedLines}${funcStr}`;
     }),
   ].join('\n');
-
-  return summary;
 }
 
 function buildPrompt(s: CommitSettings): string {
   const lang = s.language === 'auto' ? 'same as the codebase' : (langNames[s.language] || 'English');
   const diffSection = buildDiffSection(s.files, s.maxDiffSize);
+  const types = s.conventionalCommit
+    ? (s.conventionalTypes.length ? s.conventionalTypes : ['feat', 'fix', 'chore', 'docs', 'style', 'refactor', 'perf', 'test', 'ci', 'build', 'revert']).join(', ')
+    : '';
 
-  const lines: string[] = [
-    `You are a git commit message generator. Generate a ${lang} commit message for the following diff.`,
+  const parts = [
+    `Generate a ${lang} commit message for the changes below.`,
     '',
-    '## Changed files',
+    `## Files`,
     s.summaryStats,
     '',
-    '## Diff',
+    `## Diff`,
     diffSection,
-    '',
-    '## Output format',
   ];
 
   if (s.conventionalCommit) {
-    lines.push('- Use Conventional Commits format: `type(scope): subject`');
-    const types = s.conventionalTypes.length ? s.conventionalTypes : ['feat', 'fix', 'chore', 'docs', 'style', 'refactor', 'perf', 'test', 'ci', 'build', 'revert'];
-    lines.push(`  Valid types: ${types.join(', ')}`);
-    if (s.scopeDetection) {
-      lines.push('- Auto-detect scope from changed file paths (e.g., feat(api):, fix(auth):)');
-    }
-    if (s.includeBody) {
-      lines.push('- Add a blank line after subject, then a detailed body explaining what and why (not how)');
-      lines.push('- Wrap body lines at 72 characters');
-    }
-    if (s.breakingChanges) {
-      lines.push('- If the diff contains breaking API/behavior changes, add `BREAKING CHANGE:` in the footer');
-    }
-    if (s.includeFooter || s.breakingChanges) {
-      lines.push('- Footer goes after a blank line following the body');
-    }
+    parts.push('', `## Rules`);
+    parts.push(`- Format: type(scope): subject`);
+    parts.push(`- Types: ${types}`);
+    if (s.scopeDetection) parts.push(`- Scope from file paths`);
+    if (s.includeBody) parts.push(`- Body after blank line, wrap at 72`);
+    if (s.breakingChanges) parts.push(`- BREAKING CHANGE: footer if breaking`);
   } else {
-    lines.push('- Write a single subject line (no type or scope prefix)');
-    if (s.includeBody) {
-      lines.push('- Add a blank line after subject, then a body explaining what and why');
-    }
+    parts.push('', `## Rules`);
+    parts.push(`- Subject line only`);
+    if (s.includeBody) parts.push(`- Body after blank line`);
   }
 
-  lines.push(`- Subject line: max ${s.maxLength} characters`);
+  parts.push(`- Subject max: ${s.maxLength} chars`);
+  if (s.emoji) parts.push(`- Emoji prefix`);
+  if (s.tone !== 'auto' && toneNames[s.tone]) parts.push(`- Tone: ${toneNames[s.tone]}`);
+  parts.push('', `Output ONLY the commit message. No markdown.`);
 
-  if (s.emoji) {
-    lines.push('- Prefix the subject line with a relevant emoji');
-  }
-
-  if (s.tone !== 'auto' && toneNames[s.tone]) {
-    lines.push(`- Tone: ${toneNames[s.tone]}`);
-  }
-
-  lines.push('');
-  lines.push('Return ONLY the commit message. No markdown, no code fences, no extra explanation.');
-
-  return lines.join('\n');
+  return parts.join('\n');
 }
 
 function postJson(url: string, body: any, headers: Record<string, string>, timeout = 60000, signal?: AbortSignal): Promise<any> {
