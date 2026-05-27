@@ -4,6 +4,11 @@ All notable changes to the "commithub" extension will be documented in this file
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.1.1] - 2026-05-27
+
+### Fixed
+- Reverted to `git diff HEAD` (working-tree changes) so unstaged changes are always detected without requiring staging
+
 ## [1.1.0] - 2026-05-27
 
 ### Added
