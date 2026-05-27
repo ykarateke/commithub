@@ -126,7 +126,6 @@ function buildExcludeArgs(
 export async function getGitDiff(
   _cwd: string,
   userExcludePatterns: string[] = [],
-  includeUnstaged = false,
   untrackedMaxLines = 100,
   includeAutoExcludes = true,
 ): Promise<GitDiffResult> {
@@ -138,10 +137,8 @@ export async function getGitDiff(
   const root = repoInfo.root;
   const excludeArgs = buildExcludeArgs(userExcludePatterns, includeAutoExcludes);
 
-  const diffCmd = includeUnstaged ? 'git diff HEAD' : 'git diff --cached';
-
   const [trackedDiff, untrackedRaw] = await Promise.all([
-    execCmd(`${diffCmd}${excludeArgs}`, root).catch(() => ''),
+    execCmd(`git diff HEAD${excludeArgs}`, root).catch(() => ''),
     execCmd(`git ls-files --others --exclude-standard${excludeArgs}`, root),
   ]);
 

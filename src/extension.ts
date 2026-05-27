@@ -241,7 +241,6 @@ export function activate(context: vscode.ExtensionContext) {
 				.map(s => s.trim())
 				.filter(Boolean);
 
-			const includeUnstaged = cfg().get('includeUnstaged', false);
 			const untrackedMaxLines = cfg().get('untrackedFileMaxLines', 100);
 			const maxDiffSize = cfg().get('maxDiffSize', 8000);
 
@@ -251,7 +250,7 @@ export function activate(context: vscode.ExtensionContext) {
 				cancellable: true,
 			}, async (progress, token) => {
 				try {
-					const git = await getGitDiff(workspaceRoot, excludePatterns, includeUnstaged, untrackedMaxLines, true);
+					const git = await getGitDiff(workspaceRoot, excludePatterns, untrackedMaxLines, true);
 					if (!git.hasChanges) {
 						vscode.window.showInformationMessage('CommitHub: No changes detected to commit');
 						statusItem.text = '$(plug) CommitHub';
@@ -752,12 +751,6 @@ export function activate(context: vscode.ExtensionContext) {
 			await cfg().update('excludeFiles', patterns, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(patterns ? 'CommitHub: Exclude patterns saved' : 'CommitHub: Exclude patterns cleared');
 			settingsProvider.refresh();
-		})
-	);
-
-	context.subscriptions.push(
-		vscode.commands.registerCommand('commithub.setIncludeUnstaged', async () => {
-			await setToggle('CommitHub Include Unstaged', 'includeUnstaged', settingsProvider);
 		})
 	);
 

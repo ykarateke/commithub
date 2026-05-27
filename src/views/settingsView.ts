@@ -103,8 +103,6 @@ const groups: SettingGroup[] = [
 				description: () => String(cfg().get('maxDiffSize', 8000)), prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'excludeFiles', label: 'Exclude Files', icon: 'exclude', command: 'commithub.setExcludeFiles',
 				description: () => cfg().get('excludeFiles', '') || '—', prereq: () => ({ ok: true, hint: '' }) },
-			{ key: 'includeUnstaged', label: 'Include Unstaged', icon: 'versions', command: 'commithub.setIncludeUnstaged',
-				description: () => cfg().get('includeUnstaged', false) ? 'on (staged+unstaged)' : 'off (staged only)', prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'statistics', label: 'Statistics', icon: 'graph', command: 'commithub.showStats',
 				description: () => getStatsSummary(), prereq: () => ({ ok: true, hint: '' }) },
 		],

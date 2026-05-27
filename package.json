@@ -109,11 +109,6 @@
           "default": "",
           "description": "Comma-separated glob patterns to exclude from diff analysis"
         },
-        "commithub.includeUnstaged": {
-          "type": "boolean",
-          "default": false,
-          "description": "Include unstaged changes in diff analysis (staged-only by default)"
-        },
         "commithub.untrackedFileMaxLines": {
           "type": "number",
           "default": 100,

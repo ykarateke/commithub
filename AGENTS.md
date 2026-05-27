@@ -59,7 +59,7 @@ src/
 - All API calls use Node.js `https`/`http` module (not extension host `fetch` — avoids proxy issues).
 - HTTP requests are cancellable via `AbortController` wired to VS Code `CancellationToken`.
 - **Streaming** (`streamCommitMessage`): only for OpenAI-compatible providers. Anthropic & Gemini fall back to non-streaming `generateCommitMessage`.
-- Git diff: includes **staged changes** (`git diff --cached`) + untracked files. Optional `includeUnstaged` setting adds unstaged changes too.
+- Git diff: includes **all working-tree changes** (`git diff HEAD`) + untracked files.
 - **Hybrid prompt builder** (`ai.ts`): decides how to send diff to AI based on size:
   - **Tier 1** (total ≤ `maxDiffSize`): full unified diff for all files
   - **Tier 2** (total > `maxDiffSize`): include complete diffs for files that fit budget, summarize rest with file paths + ±stats + function names
@@ -76,6 +76,6 @@ Hierarchical tree view with three groups. Each setting opens an InputBox or Quic
 |---|---|
 | **Provider** | Provider (11 options), Connection, API Key, Model, Base URL, Temperature, Max Tokens |
 | **Message** | Language (32 locales), Max Length, Conventional Commit, Conventional Types, Tone (auto/formal/casual/technical/**conventional**), Include Body, Include Footer, Emoji |
-| **Analysis** | Scope Detection, Breaking Changes, Max Diff Size, Exclude Files, Include Unstaged, Statistics |
+| **Analysis** | Scope Detection, Breaking Changes, Max Diff Size, Exclude Files, Statistics |
 
 All stored in VS Code `ConfigurationTarget.Global` (or `SecretStorage` for API key).
