@@ -241,13 +241,17 @@ export function activate(context: vscode.ExtensionContext) {
 				.map(s => s.trim())
 				.filter(Boolean);
 
+			const includeUnstaged = cfg().get('includeUnstaged', false);
+			const untrackedMaxLines = cfg().get('untrackedFileMaxLines', 100);
+			const maxDiffSize = cfg().get('maxDiffSize', 8000);
+
 			vscode.window.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: 'CommitHub: Generating commit message...',
 				cancellable: true,
 			}, async (progress, token) => {
 				try {
-					const git = await getGitDiff(workspaceRoot, excludePatterns);
+					const git = await getGitDiff(workspaceRoot, excludePatterns, includeUnstaged, untrackedMaxLines, true);
 					if (!git.hasChanges) {
 						vscode.window.showInformationMessage('CommitHub: No changes detected to commit');
 						statusItem.text = '$(plug) CommitHub';
@@ -255,23 +259,20 @@ export function activate(context: vscode.ExtensionContext) {
 						return;
 					}
 
-					const maxSize = cfg().get('maxDiffSize', 3000);
-					const diff = git.diff.length > maxSize
-						? git.diff.slice(0, maxSize) + '\n... (truncated)'
-						: git.diff;
-
 					const model = cfg().get<string>('model', 'gpt-4o');
 					const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
 
-					log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} diffLen=${diff.length}`);
+					log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} files=${git.files.length}`);
 					const rawTypes = cfg().get<string>('conventionalTypes', '');
 					const abort = new AbortController();
 					token.onCancellationRequested(() => abort.abort());
 
 					const settings = {
-						diff,
-						stats: git.stats,
 						files: git.files,
+						totalAdded: git.totalAdded,
+						totalRemoved: git.totalRemoved,
+						summaryStats: git.summaryStats,
+						maxDiffSize,
 						language: cfg().get<string>('language', 'auto'),
 						maxLength: cfg().get('maxLength', 72),
 						conventionalCommit: cfg().get('conventionalCommit', true),
@@ -751,6 +752,12 @@ export function activate(context: vscode.ExtensionContext) {
 			await cfg().update('excludeFiles', patterns, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(patterns ? 'CommitHub: Exclude patterns saved' : 'CommitHub: Exclude patterns cleared');
 			settingsProvider.refresh();
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('commithub.setIncludeUnstaged', async () => {
+			await setToggle('CommitHub Include Unstaged', 'includeUnstaged', settingsProvider);
 		})
 	);
 

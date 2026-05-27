@@ -2,7 +2,7 @@
   "name": "commithub",
   "displayName": "CommitHub",
   "description": "AI-powered Git commit message generator.",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "publisher": "YasinKarateke",
   "repository": {
     "type": "git",
@@ -108,6 +108,23 @@
           "type": "string",
           "default": "",
           "description": "Comma-separated glob patterns to exclude from diff analysis"
+        },
+        "commithub.includeUnstaged": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include unstaged changes in diff analysis (staged-only by default)"
+        },
+        "commithub.untrackedFileMaxLines": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "description": "Max lines per untracked file sent to AI (truncates the rest)"
+        },
+        "commithub.summaryModeThreshold": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 1000,
+          "description": "Switch to summary-only mode if total diff chars exceed this"
         },
         "commithub.conventionalTypes": {
           "type": "string",
