@@ -73,11 +73,14 @@ async function fetchModels(apiKey: string | undefined): Promise<{ label: string;
 	const knownEndpoints: Record<string, string> = {
 		openai: 'https://api.openai.com/v1/models',
 		anthropic: 'https://api.anthropic.com/v1/models',
+		google_gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
+		zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4/models',
+		xai_grok: 'https://api.x.ai/v1/models',
+		deepseek: 'https://api.deepseek.com/models',
+		mistral: 'https://api.mistral.ai/v1/models',
 		openrouter: 'https://openrouter.ai/api/v1/models',
 		groq: 'https://api.groq.com/openai/v1/models',
 		together: 'https://api.together.xyz/v1/models',
-		deepseek: 'https://api.deepseek.com/models',
-		zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4/models',
 	};
 
 	let url: string | undefined;
@@ -112,6 +115,8 @@ async function fetchModels(apiKey: string | undefined): Promise<{ label: string;
 		else if (Array.isArray(data)) {models = data;}
 		else if (data.models) {models = data.models;}
 
+		const isGemini = provider === 'google_gemini';
+
 		if (!models || !models.length) {
 			log.warn('[fetchModels] no models returned');
 			vscode.window.showInformationMessage('CommitHub: No models returned by API. Type model name manually.');
@@ -120,9 +125,9 @@ async function fetchModels(apiKey: string | undefined): Promise<{ label: string;
 
 		log.info(`[fetchModels] OK — ${models.length} models`);
 		return models.map(m => ({
-			label: m.id,
-			description: m.display_name || m.name || m.owned_by || '',
-		}));
+			label: m.id || (m as any).name?.replace(/^models\//, '') || '',
+			description: m.display_name || (m as any).displayName || m.name?.replace(/^models\//, '') || m.owned_by || '',
+		})).filter(m => m.label);
 	} catch (e: any) {
 		log.error(`[fetchModels] FAILED — ${e.message}`);
 		vscode.window.showErrorMessage(`CommitHub: Model fetch failed — ${e.message}`);
@@ -505,30 +510,32 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!ok) {return;}
 
 			const current = cfg().get('model', 'gpt-4o');
-			const action = await vscode.window.showQuickPick(
-				[
-					{ label: 'Type model name', description: 'Enter manually' },
-					{ label: 'Fetch models from API', description: 'Auto-detect available models' },
-				],
-				{ title: 'CommitHub Model', placeHolder: `Current: ${current}` },
-			);
-			if (!action) {return;}
 
-			if (action.label === 'Fetch models from API') {
-				vscode.commands.executeCommand('commithub.fetchModels');
-				return;
+			const provider = cfg().get<string>('provider', '');
+			const apiKey = provider === 'ollama' ? '' : (await context.secrets.get('commithub.apiKey'));
+
+			let pick: { label: string; description?: string } | undefined;
+			if (provider !== 'ollama' && apiKey) {
+				const models = await fetchModels(apiKey);
+				if (models?.length) {
+					const selected = await vscode.window.showQuickPick(models, {
+						title: 'CommitHub Model',
+						placeHolder: `Current: ${current}`,
+					});
+					pick = selected;
+				}
 			}
 
-			const model = await vscode.window.showInputBox({
+			const modelName = pick?.label ?? await vscode.window.showInputBox({
 				title: 'CommitHub Model',
 				prompt: 'Enter AI model name',
 				value: current,
 				ignoreFocusOut: true,
 				placeHolder: 'gpt-4o',
 			});
-			if (!model) {return;}
-			await cfg().update('model', model, vscode.ConfigurationTarget.Global);
-			vscode.window.showInformationMessage(`CommitHub: Model set to ${model}`);
+			if (!modelName) {return;}
+			await cfg().update('model', modelName, vscode.ConfigurationTarget.Global);
+			vscode.window.showInformationMessage(`CommitHub: Model set to ${modelName}`);
 			settingsProvider.refresh();
 		})
 	);

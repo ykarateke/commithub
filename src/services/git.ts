@@ -18,12 +18,16 @@ function execCmd(cmd: string, cwd: string): Promise<string> {
 }
 
 export async function getGitDiff(cwd: string, excludePatterns: string[] = []): Promise<GitDiffResult> {
+	await execCmd('git rev-parse --git-dir', cwd).catch(() => {
+		throw new Error('Not a git repository — open a git project to use CommitHub');
+	});
+
 	const excludeArgs = excludePatterns.length
 		? ' -- ' + excludePatterns.map(p => `':(exclude)${p}'`).join(' ')
 		: '';
 
 	const [trackedDiff, untrackedRaw] = await Promise.all([
-		execCmd(`git diff HEAD${excludeArgs}`, cwd),
+		execCmd(`git diff HEAD${excludeArgs}`, cwd).catch(() => ''),
 		execCmd(`git ls-files --others --exclude-standard${excludeArgs}`, cwd),
 	]);
 
