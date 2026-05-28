@@ -52,6 +52,7 @@ const providerBaseUrls: Record<string, string> = {
 	anthropic: 'https://api.anthropic.com/v1',
 	google_gemini: 'https://generativelanguage.googleapis.com/v1beta',
 	zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4',
+	zhipu_glm_coding: 'https://open.bigmodel.cn/api/coding/paas/v4',
 	xai_grok: 'https://api.x.ai/v1',
 	deepseek: 'https://api.deepseek.com',
 	mistral: 'https://api.mistral.ai/v1',
@@ -59,20 +60,6 @@ const providerBaseUrls: Record<string, string> = {
 	openrouter: 'https://openrouter.ai/api/v1',
 	groq: 'https://api.groq.com/openai/v1',
 	together: 'https://api.together.xyz/v1',
-};
-
-const providerDefaultModels: Record<string, string> = {
-	openai: 'gpt-4o',
-	anthropic: 'claude-sonnet-4-20250514',
-	google_gemini: 'gemini-2.5-flash',
-	zhipu_glm: 'glm-4.7',
-	xai_grok: 'grok-4.1-fast',
-	deepseek: 'deepseek-v4-flash',
-	mistral: 'mistral-large-latest',
-	ollama: 'llama3',
-	openrouter: 'gpt-4o',
-	groq: 'llama-4-scout-17b',
-	together: 'meta-llama/Llama-4-Scout-17B-16E-Instruct',
 };
 
 /** Returns a list of { label, description } models fetched from the current provider's API. */
@@ -261,7 +248,7 @@ export function activate(context: vscode.ExtensionContext) {
 					const model = cfg().get<string>('model', 'gpt-4o');
 					const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
 
-					log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} files=${git.files.length}`);
+					log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} files=${git.files.length} totalDiff=+${git.totalAdded}/-${git.totalRemoved}`);
 					const rawTypes = cfg().get<string>('conventionalTypes', '');
 					const abort = new AbortController();
 					token.onCancellationRequested(() => abort.abort());
@@ -282,29 +269,41 @@ export function activate(context: vscode.ExtensionContext) {
 						scopeDetection: cfg().get('scopeDetection', true),
 						breakingChanges: cfg().get('breakingChanges', true),
 						temperature: cfg().get('temperature', 0.7),
-						maxTokens: cfg().get('maxTokens', 2000),
+						maxTokens: cfg().get('maxTokens', 500),
 						conventionalTypes: rawTypes ? rawTypes.split(',').map(s => s.trim()).filter(Boolean) : [],
 					};
 
-					const iterator = streamCommitMessage(provider, baseUrl, model, key || undefined, settings, abort.signal);
+					const t0 = Date.now();
+					const iterator = streamCommitMessage(provider, baseUrl, model, key || undefined, settings, (msg) => log.info(msg), abort.signal);
 					let fullText = '';
 					let hasFirstChunk = false;
-					let t0 = Date.now();
+					let lastUiUpdate = 0;
+					const UI_THROTTLE_MS = 100;
 					let iterResult = await iterator.next();
 
 					while (!iterResult.done) {
 						const chunk: string = iterResult.value as any;
+						if (chunk === '__REASONING__') {
+							progress.report({ message: '🧠 Model is thinking...' });
+							iterResult = await iterator.next();
+							continue;
+						}
 						fullText += chunk;
+						const now = Date.now();
 						if (!hasFirstChunk) {
 							hasFirstChunk = true;
+							log.info(`[generateCommit] TTFT (first chunk in SCM) = ${now - t0}ms`);
 							progress.report({ message: '✍️ Writing commit message...' });
 							setInputBoxValue(fullText);
-						} else {
+							lastUiUpdate = now;
+						} else if (now - lastUiUpdate >= UI_THROTTLE_MS) {
 							setInputBoxValue(fullText);
+							lastUiUpdate = now;
 						}
 						iterResult = await iterator.next();
 					}
 
+					const totalMs = Date.now() - t0;
 					const returnVal = iterResult.value as { text: string; usage: CommitUsage; finishReason: string } | undefined;
 					const finalText = returnVal?.text || fullText.trim();
 
@@ -313,9 +312,9 @@ export function activate(context: vscode.ExtensionContext) {
 						return;
 					}
 
-					if (!hasFirstChunk) {
-						setInputBoxValue(finalText);
-					}
+					setInputBoxValue(finalText);
+
+					log.info(`[generateCommit] COMPLETE — totalE2E=${totalMs}ms responseLen=${finalText.length} chars inputTokens=${returnVal?.usage.inputTokens ?? '-'} outputTokens=${returnVal?.usage.outputTokens ?? '-'}`);
 
 					if (returnVal) {
 						recordCall({
@@ -370,35 +369,58 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.setProvider', async () => {
 			const providers = [
-				{ label: 'OpenAI', description: 'GPT-4o, GPT-4o-mini, o3, o4-mini — $2.50/MTok input' },
-				{ label: 'Anthropic', description: 'Claude Sonnet 4.6, Haiku 4.5, Opus 4.6 — $3/MTok input' },
-				{ label: 'Google Gemini', description: 'Gemini 2.5 Pro, 2.5 Flash — $1.25/MTok input' },
-				{ label: 'Zhipu GLM', description: 'GLM-4, GLM-4V, GLM-4-Plus — Chinese LLM leader. Coding Plan → /api/coding/paas/v4' },
-				{ label: 'xAI Grok', description: 'Grok 4.1 Fast, Grok 4 — $0.20/MTok input (cheapest!)' },
-				{ label: 'DeepSeek', description: 'DeepSeek-V4, DeepSeek-R1 — $0.30/MTok input' },
-				{ label: 'Mistral', description: 'Mistral Large, Mistral Small — $2/MTok input' },
-				{ label: 'Ollama', description: 'Local LLMs: Llama 3, DeepSeek, Qwen — free & private' },
-				{ label: 'OpenRouter', description: 'Multi-provider gateway — 100+ models' },
-				{ label: 'Groq', description: 'Fast inference: Llama 4, Mixtral — ~500 tok/s' },
-				{ label: 'Together AI', description: 'Open-source models hosted — $0.10-0.80/MTok' },
+				{ label: 'OpenAI', description: 'GPT-4o, GPT-4o-mini, o3, o4-mini — $2.50/MTok input', id: 'openai' },
+				{ label: 'Anthropic', description: 'Claude Sonnet 4.6, Haiku 4.5, Opus 4.6 — $3/MTok input', id: 'anthropic' },
+				{ label: 'Google Gemini', description: 'Gemini 2.5 Pro, 2.5 Flash — $1.25/MTok input', id: 'google_gemini' },
+				{ label: 'Zhipu GLM', description: 'All models: GLM-4.7-Flash (free), GLM-4.5-Air, GLM-5-Turbo, GLM-5.1', id: 'zhipu_glm' },
+				{ label: 'Zhipu GLM (Coding)', description: 'Coding plan: GLM-4.5-Air, GLM-5-Turbo — optimized for code', id: 'zhipu_glm_coding' },
+				{ label: 'xAI Grok', description: 'Grok 4.1 Fast, Grok 4 — $0.20/MTok input (cheapest!)', id: 'xai_grok' },
+				{ label: 'DeepSeek', description: 'DeepSeek-V4, DeepSeek-R1 — $0.30/MTok input', id: 'deepseek' },
+				{ label: 'Mistral', description: 'Mistral Large, Mistral Small — $2/MTok input', id: 'mistral' },
+				{ label: 'Ollama', description: 'Local LLMs: Llama 3, DeepSeek, Qwen — free & private', id: 'ollama' },
+				{ label: 'OpenRouter', description: 'Multi-provider gateway — 100+ models', id: 'openrouter' },
+				{ label: 'Groq', description: 'Fast inference: Llama 4, Mixtral — ~500 tok/s', id: 'groq' },
+				{ label: 'Together AI', description: 'Open-source models hosted — $0.10-0.80/MTok', id: 'together' },
 			];
 			const pick = await vscode.window.showQuickPick(providers, {
 				title: 'CommitHub AI Provider',
 				placeHolder: 'Select AI provider',
 			});
 			if (!pick) {return;}
-			const id = pick.label.toLowerCase().replace(/\s+/g, '_');
+			const id = pick.id;
 			await cfg().update('provider', id, vscode.ConfigurationTarget.Global);
 			const defaultUrl = providerBaseUrls[id] || '';
-			const currentUrl = cfg().get('baseUrl', '');
-			if (!currentUrl || currentUrl === 'custom') {
-				await cfg().update('baseUrl', defaultUrl, vscode.ConfigurationTarget.Global);
+			await cfg().update('baseUrl', defaultUrl, vscode.ConfigurationTarget.Global);
+			settingsProvider.refresh();
+			vscode.window.showInformationMessage(`CommitHub: Provider set to ${pick.label}`);
+
+			const apiKey = id === 'ollama' ? '' : (await context.secrets.get('commithub.apiKey'));
+			if (apiKey || id === 'ollama') {
+				const models = await fetchModels(apiKey);
+				if (models?.length) {
+					const modelPick = await vscode.window.showQuickPick(models, {
+						title: `CommitHub — Select Model (${pick.label})`,
+						placeHolder: `${models.length} models fetched`,
+						matchOnDescription: true,
+					});
+					if (modelPick) {
+						await cfg().update('model', modelPick.label, vscode.ConfigurationTarget.Global);
+						vscode.window.showInformationMessage(`CommitHub: Model set to ${modelPick.label}`);
+					}
+				} else {
+					const manual = await vscode.window.showInputBox({
+						title: 'CommitHub Model',
+						prompt: 'Could not fetch models — enter model name manually',
+						ignoreFocusOut: true,
+					});
+					if (manual) {
+						await cfg().update('model', manual, vscode.ConfigurationTarget.Global);
+					}
+				}
+			} else {
+				vscode.window.showWarningMessage('CommitHub: Set your API Key first, then use Fetch Models to pick a model.', 'Set API Key')
+					.then(a => { if (a) { vscode.commands.executeCommand('commithub.setApiKey'); }});
 			}
-			const defaultModel = providerDefaultModels[id];
-			if (defaultModel) {
-				await cfg().update('model', defaultModel, vscode.ConfigurationTarget.Global);
-			}
-			vscode.window.showInformationMessage(`CommitHub: Provider set to ${pick.label}${defaultUrl ? ` — Base URL: ${defaultUrl}` : ''}`);
 			settingsProvider.refresh();
 			vscode.commands.executeCommand('commithub.testConnection');
 		})
@@ -435,7 +457,8 @@ export function activate(context: vscode.ExtensionContext) {
 					groq: 'https://api.groq.com/openai/v1/models',
 					together: 'https://api.together.xyz/v1/models',
 					deepseek: 'https://api.deepseek.com/models',
-					zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4/models',
+		zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4/models',
+		zhipu_glm_coding: 'https://open.bigmodel.cn/api/coding/paas/v4/models',
 				};
 				testUrl = known[provider];
 			}
@@ -593,7 +616,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.setMaxTokens', async () => {
-			await setNumber('CommitHub Max Tokens', 'maxTokens', 2000, settingsProvider);
+			await setNumber('CommitHub Max Tokens', 'maxTokens', 500, settingsProvider);
 		})
 	);
 

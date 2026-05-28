@@ -160,34 +160,74 @@ export async function getGitDiff(
 
   const untrackedFileList = untrackedRaw.split('\n').filter(Boolean);
 
-  const lineCounts = await Promise.all(
-    untrackedFileList.map(f =>
-      execCmd(`wc -l < "${f}"`, root)
-        .then(c => ({ file: f, lines: parseInt(c.trim(), 10) || 0 }))
-        .catch(() => ({ file: f, lines: 0 }))
-    )
+  const untrackedFileData = await Promise.all(
+    untrackedFileList.map(async (f) => {
+      const lineCount = await execCmd(`wc -l < "${f}"`, root)
+        .then(c => parseInt(c.trim(), 10) || 0)
+        .catch(() => 0);
+
+      const head = await execCmd(`head -n ${untrackedMaxLines} "${f}"`, root)
+        .then(c => c.trim())
+        .catch(() => '');
+
+      const truncated = lineCount > untrackedMaxLines;
+      const lines = head.split('\n').length;
+      const rawDiff = [
+        `diff --git a/${f} b/${f}`,
+        'new file mode 100644',
+        `--- /dev/null`,
+        `+++ b/${f}`,
+        `@@ -0,0 +1,${lines} @@`,
+        ...head.split('\n').map((l: string) => `+${l}`),
+        truncated ? `\n[truncated — ${lineCount} total lines, showing first ${untrackedMaxLines}]` : '',
+      ].join('\n');
+
+      return {
+        fileDiff: {
+          filePath: f,
+          status: 'added' as const,
+          addedLines: lines,
+          removedLines: 0,
+          hunks: [{
+            header: `@@ -0,0 +1,${lines} @@`,
+            content: rawDiff,
+            funcName: '',
+            addedLines: lines,
+            removedLines: 0,
+          }],
+          rawDiff,
+          isTruncated: truncated,
+        },
+        lineCount,
+        truncated,
+      };
+    })
   );
 
-  const totalAdded = trackedFiles.reduce((s, f) => s + f.addedLines, 0);
-  const totalRemoved = trackedFiles.reduce((s, f) => s + f.removedLines, 0);
+  const untrackedFiles = untrackedFileData.map(d => d.fileDiff);
 
-  const untrackedPaths = lineCounts.map(lc => {
-    const truncated = lc.lines > untrackedMaxLines;
-    return `${lc.file} (${Math.min(lc.lines, untrackedMaxLines)} line${lc.lines > 1 ? 's' : ''}${truncated ? ', truncated' : ''})`;
+  const allFiles = [...trackedFiles, ...untrackedFiles];
+
+  const totalAdded = allFiles.reduce((s, f) => s + f.addedLines, 0);
+  const totalRemoved = allFiles.reduce((s, f) => s + f.removedLines, 0);
+
+  const untrackedPaths = untrackedFileData.map(d => {
+    const lines = Math.min(d.lineCount, untrackedMaxLines);
+    return `${d.fileDiff.filePath} (${lines} line${lines > 1 ? 's' : ''}${d.truncated ? ', truncated' : ''})`;
   });
 
   const summaryStats = [
-    trackedFiles.length ? `modified: ${trackedFiles.length} file(s), +${totalAdded}/-${totalRemoved}` : '',
+    trackedFiles.length ? `modified: ${trackedFiles.length} file(s), +${trackedFiles.reduce((s, f) => s + f.addedLines, 0)}/-${trackedFiles.reduce((s, f) => s + f.removedLines, 0)}` : '',
     untrackedPaths.length ? `new: ${untrackedPaths.join(', ')}` : '',
   ].filter(Boolean).join('\n');
 
   const result: GitDiffResult = {
-    files: trackedFiles,
-    hasChanges: trackedFiles.length > 0 || untrackedFileList.length > 0,
+    files: allFiles,
+    hasChanges: allFiles.length > 0,
     totalAdded,
     totalRemoved,
     summaryStats,
-    allFilePaths: [trackedFiles.map(f => f.filePath), ...untrackedFileList].flat(),
+    allFilePaths: allFiles.map(f => f.filePath),
   };
 
   if (cacheKey) {
