@@ -4,6 +4,14 @@ All notable changes to the "commithub" extension will be documented in this file
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.3.1] - 2026-07-06
+
+### Fixed
+- Fixed exclude patterns failing on Windows because shell quotes were passed to Git literally
+- Replaced platform-specific `wc` and `head` commands when reading untracked files
+- Included staged files when generating the first commit in a repository without `HEAD`
+- Safely handled untracked file names containing spaces and shell metacharacters
+
 ## [1.2.0] - 2026-05-27
 
 ### Performance

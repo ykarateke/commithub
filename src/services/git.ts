@@ -1,4 +1,7 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
+import { createReadStream } from 'fs';
+import * as path from 'path';
+import * as readline from 'readline';
 import * as vscode from 'vscode';
 
 export interface HunkInfo {
@@ -40,13 +43,27 @@ let diffCache: { key: string; result: GitDiffResult } | undefined;
 
 let _cachedRoot: string = '';
 
-function execCmd(cmd: string, cwd: string): Promise<string> {
+function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
       if (err) { reject(err); return; }
       resolve(stdout);
     });
   });
+}
+
+async function readFileLines(filePath: string, maxLines: number): Promise<{ content: string; lineCount: number }> {
+  const input = createReadStream(filePath, { encoding: 'utf8' });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  const included: string[] = [];
+  let lineCount = 0;
+
+  for await (const line of lines) {
+    lineCount++;
+    if (included.length < maxLines) included.push(line);
+  }
+
+  return { content: included.join('\n'), lineCount };
 }
 
 function getRepo(): { root: string } | undefined {
@@ -114,20 +131,20 @@ function parseDiffOutput(raw: string): FileDiff[] {
   return files;
 }
 
-function buildExcludeArgs(
+function buildExcludePathspecs(
   userPatterns: string[],
   includeDefaults: boolean,
-): string {
+): string[] {
   const patterns = includeDefaults
     ? [...new Set([...AUTO_EXCLUDE_DEFAULTS, ...userPatterns])]
     : userPatterns;
 
-  if (!patterns.length) return '';
-  return ' -- ' + patterns.map(p => `':(exclude)${p}'`).join(' ');
+  if (!patterns.length) return [];
+  return ['--', ...patterns.map(p => `:(exclude)${p}`)];
 }
 
 function buildCacheKey(root: string): Promise<string> {
-  return execCmd('git status --porcelain -u', root).then(out => out.trim()).catch(() => '');
+  return execGit(['status', '--porcelain', '-u'], root).then(out => out.trim()).catch(() => '');
 }
 
 export async function getGitDiff(
@@ -141,37 +158,44 @@ export async function getGitDiff(
     throw new Error('Not a git repository — open a git project to use CommitHub');
   }
 
-  const root = repoInfo.root;
-  const excludeArgs = buildExcludeArgs(userExcludePatterns, includeAutoExcludes);
+  return getGitDiffForRoot(repoInfo.root, userExcludePatterns, untrackedMaxLines, includeAutoExcludes);
+}
+
+export async function getGitDiffForRoot(
+  root: string,
+  userExcludePatterns: string[] = [],
+  untrackedMaxLines = 100,
+  includeAutoExcludes = true,
+): Promise<GitDiffResult> {
+  const excludePathspecs = buildExcludePathspecs(userExcludePatterns, includeAutoExcludes);
 
   const cacheKey = await buildCacheKey(root);
   if (diffCache && diffCache.key === cacheKey && _cachedRoot === root) {
     return diffCache.result;
   }
 
-  const diffArgs = '-U2';
+  const hasHead = await execGit(['rev-parse', '--verify', 'HEAD'], root)
+    .then(() => true)
+    .catch(() => false);
+  const diffArgs = hasHead
+    ? ['diff', 'HEAD', '-U2', ...excludePathspecs]
+    : ['diff', '--cached', '-U2', ...excludePathspecs];
 
   const [trackedDiff, untrackedRaw] = await Promise.all([
-    execCmd(`git diff HEAD ${diffArgs}${excludeArgs}`, root).catch(() => ''),
-    execCmd(`git ls-files --others --exclude-standard${excludeArgs}`, root),
+    execGit(diffArgs, root),
+    execGit(['ls-files', '--others', '--exclude-standard', '-z', ...excludePathspecs], root),
   ]);
 
   const trackedFiles = parseDiffOutput(trackedDiff);
 
-  const untrackedFileList = untrackedRaw.split('\n').filter(Boolean);
+  const untrackedFileList = untrackedRaw.split('\0').filter(Boolean);
 
   const untrackedFileData = await Promise.all(
     untrackedFileList.map(async (f) => {
-      const lineCount = await execCmd(`wc -l < "${f}"`, root)
-        .then(c => parseInt(c.trim(), 10) || 0)
-        .catch(() => 0);
-
-      const head = await execCmd(`head -n ${untrackedMaxLines} "${f}"`, root)
-        .then(c => c.trim())
-        .catch(() => '');
+      const { content: head, lineCount } = await readFileLines(path.resolve(root, f), untrackedMaxLines);
 
       const truncated = lineCount > untrackedMaxLines;
-      const lines = head.split('\n').length;
+      const lines = Math.min(lineCount, untrackedMaxLines);
       const rawDiff = [
         `diff --git a/${f} b/${f}`,
         'new file mode 100644',
