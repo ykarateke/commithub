@@ -261,6 +261,23 @@ suite('Git diff reader', () => {
 		}
 	});
 
+	test('reads latest working-tree content before the first commit', async () => {
+		const root = await createRepo();
+		try {
+			await writeFile(path.join(root, 'first.ts'), 'export const state = "staged";\n');
+			execFileSync('git', ['add', '--', 'first.ts'], { cwd: root });
+			await writeFile(path.join(root, 'first.ts'), 'export const state = "working";\n');
+
+			const result = await getGitDiffForRoot(root);
+
+			assert.strictEqual(result.files[0].status, 'added');
+			assert.ok(result.files[0].rawDiff.includes('+export const state = "working";'));
+			assert.ok(!result.files[0].rawDiff.includes('+export const state = "staged";'));
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	test('returns fresh diff content when a modified file changes again', async () => {
 		const root = await createRepo();
 		try {

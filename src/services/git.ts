@@ -39,12 +39,15 @@ const AUTO_EXCLUDE_DEFAULTS = [
   '*.min.js', '*.min.css', '*.bundle.js',
 ];
 
-function execGit(args: string[], cwd: string): Promise<string> {
+function execGit(args: string[], cwd: string, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    const child = execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
       if (err) { reject(err); return; }
       resolve(stdout);
     });
+    if (stdin !== undefined) {
+      child.stdin?.end(stdin);
+    }
   });
 }
 
@@ -171,9 +174,10 @@ export async function getGitDiffForRoot(
   const hasHead = await execGit(['rev-parse', '--verify', 'HEAD'], root)
     .then(() => true)
     .catch(() => false);
-  const diffArgs = hasHead
-    ? ['diff', 'HEAD', '-U2', ...excludePathspecs]
-    : ['diff', '--cached', '-U2', ...excludePathspecs];
+  const baseRevision = hasHead
+    ? 'HEAD'
+    : (await execGit(['hash-object', '-t', 'tree', '--stdin'], root, '')).trim();
+  const diffArgs = ['diff', baseRevision, '-U2', ...excludePathspecs];
 
   const [trackedDiff, untrackedRaw] = await Promise.all([
     execGit(diffArgs, root),
