@@ -320,4 +320,19 @@ suite('Git diff reader', () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	test('bounds reads for very large untracked files', async () => {
+		const root = await createRepo();
+		try {
+			await writeFile(path.join(root, 'large.txt'), 'x'.repeat(400 * 1024));
+
+			const result = await getGitDiffForRoot(root, [], 100, false);
+
+			assert.strictEqual(result.files[0].isTruncated, true);
+			assert.ok(result.files[0].rawDiff.length < 300 * 1024);
+			assert.ok(result.files[0].rawDiff.includes('showing at most 100 lines / 256 KB'));
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });

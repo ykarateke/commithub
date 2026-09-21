@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { createReadStream } from 'fs';
+import { lstat } from 'fs/promises';
 import * as path from 'path';
 import * as readline from 'readline';
 import * as vscode from 'vscode';
@@ -44,9 +45,12 @@ const AUTO_EXCLUDE_DEFAULTS = [
   '*.min.js', '*.min.css', '*.bundle.js',
 ];
 
+const MAX_TRACKED_DIFF_BYTES = 10 * 1024 * 1024;
+const MAX_UNTRACKED_FILE_BYTES = 256 * 1024;
+
 function execGit(args: string[], cwd: string, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    const child = execFile('git', args, { cwd, maxBuffer: MAX_TRACKED_DIFF_BYTES }, (err, stdout) => {
       if (err) { reject(err); return; }
       resolve(stdout);
     });
@@ -56,18 +60,39 @@ function execGit(args: string[], cwd: string, stdin?: string): Promise<string> {
   });
 }
 
-async function readFileLines(filePath: string, maxLines: number): Promise<{ content: string; lineCount: number }> {
-  const input = createReadStream(filePath, { encoding: 'utf8' });
+async function readFileLines(filePath: string, maxLines: number): Promise<{ content: string; lineCount: number; truncated: boolean }> {
+  const fileStat = await lstat(filePath);
+  if (fileStat.isSymbolicLink()) {
+    return { content: '[symbolic link target omitted]', lineCount: 1, truncated: true };
+  }
+  if (!fileStat.isFile()) {
+    return { content: '[non-regular file omitted]', lineCount: 1, truncated: true };
+  }
+  const byteTruncated = fileStat.size > MAX_UNTRACKED_FILE_BYTES;
+  const input = createReadStream(filePath, {
+    encoding: 'utf8',
+    end: Math.max(0, Math.min(fileStat.size, MAX_UNTRACKED_FILE_BYTES) - 1),
+  });
   const lines = readline.createInterface({ input, crlfDelay: Infinity });
   const included: string[] = [];
   let lineCount = 0;
 
-  for await (const line of lines) {
-    lineCount++;
-    if (included.length < maxLines) included.push(line);
+  try {
+    for await (const line of lines) {
+      lineCount++;
+      if (included.length < maxLines) {included.push(line);}
+      if (lineCount > maxLines) {break;}
+    }
+  } finally {
+    lines.close();
+    input.destroy();
   }
 
-  return { content: included.join('\n'), lineCount };
+  const content = included.join('\n');
+  if (content.includes('\0')) {
+    return { content: '[binary file omitted]', lineCount: 1, truncated: true };
+  }
+  return { content, lineCount: Math.min(lineCount, maxLines), truncated: byteTruncated || lineCount > maxLines };
 }
 
 function isPathInside(root: string, candidate: string): boolean {
@@ -159,6 +184,23 @@ function parseDiffOutput(raw: string, changedFiles: ChangedFile[]): FileDiff[] {
   return files;
 }
 
+function buildTruncatedTrackedFiles(changedFiles: ChangedFile[]): FileDiff[] {
+  return changedFiles.map(file => ({
+    filePath: file.filePath,
+    status: file.status,
+    addedLines: 0,
+    removedLines: 0,
+    hunks: [],
+    rawDiff: `diff --git a/${file.filePath} b/${file.filePath}\n[full diff omitted — tracked changes exceed ${MAX_TRACKED_DIFF_BYTES / 1024 / 1024} MB]`,
+    isTruncated: true,
+  }));
+}
+
+function isMaxBufferError(error: unknown): boolean {
+  const candidate = error as { code?: string; message?: string };
+  return candidate?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || candidate?.message?.includes('maxBuffer') === true;
+}
+
 function buildExcludePathspecs(
   userPatterns: string[],
   includeDefaults: boolean,
@@ -201,22 +243,27 @@ export async function getGitDiffForRoot(
     : (await execGit(['hash-object', '-t', 'tree', '--stdin'], root, '')).trim();
   const diffArgs = ['diff', baseRevision, '-U2', ...excludePathspecs];
 
-  const [trackedDiff, nameStatusRaw, untrackedRaw] = await Promise.all([
-    execGit(diffArgs, root),
+  const [nameStatusRaw, untrackedRaw] = await Promise.all([
     execGit(['diff', '--name-status', '-z', baseRevision, ...excludePathspecs], root),
     execGit(['ls-files', '--others', '--exclude-standard', '-z', ...excludePathspecs], root),
   ]);
 
-  const trackedFiles = parseDiffOutput(trackedDiff, parseNameStatus(nameStatusRaw));
+  const changedFiles = parseNameStatus(nameStatusRaw);
+  let trackedFiles: FileDiff[];
+  try {
+    trackedFiles = parseDiffOutput(await execGit(diffArgs, root), changedFiles);
+  } catch (error) {
+    if (!isMaxBufferError(error)) {throw error;}
+    trackedFiles = buildTruncatedTrackedFiles(changedFiles);
+  }
 
   const untrackedFileList = untrackedRaw.split('\0').filter(Boolean);
 
   const untrackedFileData = await Promise.all(
     untrackedFileList.map(async (f) => {
-      const { content: head, lineCount } = await readFileLines(path.resolve(root, f), untrackedMaxLines);
+      const { content: head, lineCount, truncated } = await readFileLines(path.resolve(root, f), untrackedMaxLines);
 
-      const truncated = lineCount > untrackedMaxLines;
-      const lines = Math.min(lineCount, untrackedMaxLines);
+      const lines = lineCount;
       const rawDiff = [
         `diff --git a/${f} b/${f}`,
         'new file mode 100644',
@@ -224,7 +271,7 @@ export async function getGitDiffForRoot(
         `+++ b/${f}`,
         `@@ -0,0 +1,${lines} @@`,
         ...head.split('\n').map((l: string) => `+${l}`),
-        truncated ? `\n[truncated — ${lineCount} total lines, showing first ${untrackedMaxLines}]` : '',
+        truncated ? `\n[truncated — showing at most ${untrackedMaxLines} lines / ${MAX_UNTRACKED_FILE_BYTES / 1024} KB]` : '',
       ].join('\n');
 
       return {
