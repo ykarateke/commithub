@@ -1,7 +1,7 @@
-import * as https from 'https';
 import * as http from 'http';
 import { FileDiff } from './git';
 import { AdapterRequest, AdapterStreamEvent, getProviderAdapter, ProviderAdapter } from './adapters';
+import { openJsonStream, requestJson } from './httpClient';
 
 interface CommitSettings {
   files: FileDiff[];
@@ -119,68 +119,6 @@ function buildPrompt(s: CommitSettings): string {
   return parts.join('\n');
 }
 
-function postJson(url: string, body: any, headers: Record<string, string>, timeout = 60000, signal?: AbortSignal): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https') ? https : http;
-    const data = JSON.stringify(body);
-    const urlObj = new URL(url);
-    const options = {
-      hostname: urlObj.hostname,
-      port: urlObj.port,
-      path: urlObj.pathname + urlObj.search,
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-      timeout,
-    };
-    const req = mod.request(options, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer) => chunks.push(chunk));
-      res.on('end', () => {
-        const bodyText = Buffer.concat(chunks).toString();
-        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-          reject(new Error(`HTTP ${res.statusCode}: ${bodyText.slice(0, 200)}`));
-          return;
-        }
-        try { resolve(JSON.parse(bodyText)); }
-        catch { reject(new Error(`Invalid JSON: ${bodyText.slice(0, 200)}`)); }
-      });
-    });
-    req.on('error', (e) => {
-      if (e.name === 'AbortError') { reject(new Error('Canceled')); return; }
-      reject(e);
-    });
-    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
-    if (signal) {
-      signal.addEventListener('abort', () => { req.destroy(); }, { once: true });
-    }
-    req.write(data);
-    req.end();
-  });
-}
-
-async function makeStreamRequest(url: string, body: any, headers: Record<string, string>, signal?: AbortSignal): Promise<http.IncomingMessage> {
-  const mod = url.startsWith('https') ? https : http;
-  const data = JSON.stringify(body);
-  const urlObj = new URL(url);
-  const options = {
-    hostname: urlObj.hostname,
-    port: urlObj.port,
-    path: urlObj.pathname + urlObj.search,
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-    timeout: 120000,
-  };
-
-  return new Promise<http.IncomingMessage>((resolve, reject) => {
-    const req = mod.request(options, (res) => { resolve(res); });
-    req.on('error', (e) => { if (e.name === 'AbortError') { reject(new Error('Canceled')); } else { reject(e); } });
-    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
-    if (signal) { signal.addEventListener('abort', () => { req.destroy(); }, { once: true }); }
-    req.write(data);
-    req.end();
-  });
-}
-
 async function checkStreamError(stream: http.IncomingMessage): Promise<void> {
   if (stream.statusCode && stream.statusCode >= 200 && stream.statusCode < 300) return;
   const errBody = await new Promise<string>(resolve => {
@@ -214,7 +152,7 @@ async function* streamAdapterEvents(
   logFn: (msg: string) => void,
   signal?: AbortSignal,
 ): AsyncGenerator<AdapterStreamEvent, void, undefined> {
-  const stream = await makeStreamRequest(request.url, request.body, request.headers, signal);
+  const stream = await openJsonStream(request.url, request.body, request.headers, 120000, signal);
   await checkStreamError(stream);
 
   let loggedFirstLine = false;
@@ -251,7 +189,7 @@ export async function generateCommitMessage(
   try {
     const adapter = getProviderAdapter(provider);
     const request = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: false });
-    const data = await postJson(request.url, request.body, request.headers, 60000, signal);
+    const data = await requestJson(request.url, request.body, request.headers, 60000, signal);
     const parsed = adapter.parseResponse(data);
     return {
       text: parsed.text.trim(),

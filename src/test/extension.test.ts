@@ -13,6 +13,7 @@ import { getGitDiffForRoot } from '../services/git';
 import { filterAndSortModels, recommendModel } from '../services/modelDiscovery';
 import { getProviderAdapter } from '../services/adapters';
 import { generateCommitMessage, streamCommitMessage } from '../services/ai';
+import { requestJson } from '../services/httpClient';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -108,7 +109,7 @@ suite('AI provider adapters', () => {
 suite('AI HTTP transport', () => {
 	let server: Server;
 	let baseUrl: string;
-	let responseMode: 'json' | 'stream' | 'error' = 'json';
+	let responseMode: 'json' | 'stream' | 'error' | 'hang' = 'json';
 	const settings = {
 		files: [], totalAdded: 1, totalRemoved: 0, summaryStats: 'app.ts | 1 +', language: 'en',
 		maxLength: 72, conventionalCommit: true, includeBody: false, includeFooter: false,
@@ -124,6 +125,7 @@ suite('AI HTTP transport', () => {
 				assert.strictEqual(req.url, '/v1/chat/completions');
 				assert.strictEqual(req.headers.authorization, 'Bearer test-key');
 				assert.strictEqual(JSON.parse(requestBody).model, 'test-model');
+				if (responseMode === 'hang') {return;}
 
 				if (responseMode === 'error') {
 					res.writeHead(429, { 'Content-Type': 'application/json' });
@@ -182,6 +184,24 @@ suite('AI HTTP transport', () => {
 			generateCommitMessage('openai', baseUrl, 'test-model', 'test-key', settings),
 			/AI request failed: HTTP 429.*rate limited/,
 		);
+	});
+
+	test('times out stalled requests', async () => {
+		responseMode = 'hang';
+		await assert.rejects(
+			requestJson(`${baseUrl}/chat/completions`, { model: 'test-model' }, { Authorization: 'Bearer test-key' }, 25),
+			/Request timed out/,
+		);
+	});
+
+	test('cancels stalled requests with a stable error', async () => {
+		responseMode = 'hang';
+		const controller = new AbortController();
+		const pending = requestJson(
+			`${baseUrl}/chat/completions`, { model: 'test-model' }, { Authorization: 'Bearer test-key' }, 1000, controller.signal,
+		);
+		controller.abort();
+		await assert.rejects(pending, /^Error: Canceled$/);
 	});
 });
 
