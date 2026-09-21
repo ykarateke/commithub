@@ -108,7 +108,7 @@
           "type": "number",
           "default": 8000,
           "minimum": 1000,
-          "description": "Truncate diff to this many characters before sending to AI"
+          "description": "Full-diff character budget before CommitHub switches to hybrid or summary mode"
         },
         "commithub.excludeFiles": {
           "type": "string",
@@ -119,7 +119,7 @@
           "type": "number",
           "default": 100,
           "minimum": 10,
-          "description": "Max lines per untracked file sent to AI (truncates the rest)"
+          "description": "Max lines per untracked file sent to AI (also capped at 256 KB; binary and symlink targets are omitted)"
         },
         "commithub.summaryModeThreshold": {
           "type": "number",

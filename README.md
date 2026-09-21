@@ -2,13 +2,14 @@
 
 **AI-powered Git commit message generator for VS Code**
 
-Generate conventional commit messages from your staged changes with a single click. Supports 11+ AI providers, full Conventional Commits spec, emoji, 32 languages, and more.
+Generate conventional commit messages from all working-tree changes with a single click. Supports 12 AI provider configurations, automatic model selection, Conventional Commits, emoji, and 32 languages.
 
 ## Features
 
 - **One-click commit** — SCM title bar button generates a commit message from your git diff
 - **Writes to SCM input box** — the generated message appears directly in Source Control's input field; review, edit, then commit manually
-- **11+ AI providers** — OpenAI, Anthropic, Google Gemini, Zhipu GLM, xAI Grok, DeepSeek, Mistral, Ollama, OpenRouter, Groq, Together AI
+- **12 provider configurations** — OpenAI, Anthropic, Gemini, Zhipu GLM, xAI, DeepSeek, Mistral, Ollama, OpenRouter, Groq, Together AI, and Zhipu Coding Plan
+- **Model profiles** — `Fast`, `Balanced`, and `Quality` automatically select an appropriate discovered model; `Manual` preserves an explicit choice
 - **Conventional Commits** — `feat:`, `fix:`, `docs:`, `chore:` and more with a fully customizable type list
 - **Emoji support** — relevant emoji prefix on commit messages
 - **32 languages** — generate messages in Turkish, English, German, French, Japanese, Chinese, and more
@@ -18,11 +19,12 @@ Generate conventional commit messages from your staged changes with a single cli
 - **Prerequisite system** — warns when required settings are missing and guides you to the right place
 - **Connection status** — status bar shows `✓ CommitHub` with live connection state
 - **Persistent statistics** — token usage, API call counts survive across sessions
-- **Debug channel** — dedicated Output Channel logs all API requests and responses
-- **Model discovery** — fetch available models directly from your provider's API
+- **Debug channel** — dedicated Output Channel records request diagnostics, timing, and token metadata
+- **Model discovery** — fetches, filters, ranks, and temporarily caches models from the provider API
 - **Custom Base URL** — supports any OpenAI-compatible endpoint
 - **Cancellable** — progress notification with Cancel button for long-running requests
-- **Untracked files** — new (untracked) files are included in the diff sent to the AI
+- **Complete Git changes** — staged, unstaged, deleted, renamed, and untracked files are included
+- **Repository-aware** — multi-root and nested workspaces write the result to the matching SCM input
 - **Auto-start** — activates on VS Code startup, status bar ready immediately
 
 ## Getting Started
@@ -44,11 +46,12 @@ All settings are accessible from the CommitHub panel in the Activity Bar, organi
 |---|---|---|
 | Provider | AI provider | openai |
 | Connection | Test connection to the API | — |
-| API Key | API key (stored in SecretStorage) | — |
+| API Key | Provider-specific API key stored in SecretStorage | — |
 | Model | Model name | gpt-4o |
+| Model Profile | Automatic selection strategy (`fast`, `balanced`, `quality`, `manual`) | balanced |
 | Base URL | Custom API endpoint | (auto) |
 | Temperature | Creativity (0=deterministic, 2=creative) | 0.7 |
-| Max Tokens | Max response tokens | 2000 |
+| Max Tokens | Max response tokens | 500 |
 
 ### Message
 
@@ -82,17 +85,19 @@ All settings are accessible from the CommitHub panel in the Activity Bar, organi
 | Google Gemini | gemini-2.5-flash | https://generativelanguage.googleapis.com/v1beta |
 | Zhipu GLM | glm-4.7 | https://open.bigmodel.cn/api/paas/v4 |
 | xAI Grok | grok-4.1-fast | https://api.x.ai/v1 |
-| DeepSeek | deepseek-v4-flash | https://api.deepseek.com |
-| Mistral | mistral-large-latest | https://api.mistral.ai/v1 |
-| Ollama | llama3 | http://localhost:11434/v1 |
-| OpenRouter | gpt-4o | https://openrouter.ai/api/v1 |
-| Groq | llama-4-scout-17b | https://api.groq.com/openai/v1 |
-| Together AI | Llama-4-Scout-17B-16E-Instruct | https://api.together.xyz/v1 |
+| Zhipu GLM (Coding) | glm-4.5-air | https://open.bigmodel.cn/api/coding/paas/v4 |
+| DeepSeek | deepseek-flash | https://api.deepseek.com |
+| Mistral | mistral-small-latest | https://api.mistral.ai/v1 |
+| Ollama | llama3.2 | http://localhost:11434/v1 |
+| OpenRouter | openai/gpt-4o-mini | https://openrouter.ai/api/v1 |
+| Groq | llama-3.3-70b-versatile | https://api.groq.com/openai/v1 |
+| Together AI | meta-llama/Llama-3.3-70B-Instruct-Turbo | https://api.together.xyz/v1 |
 
 ### Notes
 
-- **Zhipu Coding Plan**: Set Base URL to `https://open.bigmodel.cn/api/coding/paas/v4`
 - **Ollama**: No API key required — runs locally
+- **DeepSeek**: `Quality` enables thinking with high reasoning effort; `Fast` and `Balanced` disable thinking for lower latency
+- API keys are retained independently when switching providers
 
 ## Commands
 
@@ -102,6 +107,7 @@ All settings are accessible from the CommitHub panel in the Activity Bar, organi
 | `CommitHub: Set API Key` | Settings → API Key |
 | `CommitHub: Set AI Provider` | Settings → Provider |
 | `CommitHub: Set Model` | Settings → Model (or Fetch from API) |
+| `CommitHub: Set Model Profile` | Settings → Model Profile |
 | `CommitHub: Set Base URL` | Settings → Base URL |
 | `CommitHub: Set Temperature` | Settings → Temperature |
 | `CommitHub: Set Max Tokens` | Settings → Max Tokens |
@@ -152,18 +158,31 @@ src/
 ├── extension.ts          # Entry point, all command registrations
 ├── state.ts              # Global state (connection, stats, persistence)
 ├── services/
-│   ├── git.ts            # Git diff reader (staged/unstaged, exclude patterns)
-│   └── ai.ts             # AI prompt builder + provider API calls
+│   ├── git.ts            # Repository-aware, bounded Git diff reader
+│   ├── ai.ts             # Prompt and streaming orchestration
+│   ├── httpClient.ts     # Cancellable Node HTTP transport
+│   ├── modelDiscovery.ts # Model discovery, ranking, profiles, cache
+│   ├── providers.ts      # Provider registry and defaults
+│   └── adapters/         # OpenAI, Anthropic, Gemini, DeepSeek protocols
 └── views/
-    └── settingsView.ts   # Tree Data Provider (3 groups, 22 settings)
+	└── settingsView.ts   # Tree Data Provider
 ```
 
 - **Dual compiler**: Extension built with webpack, tests with `tsc`
 - `vscode`, `https`, `http`, `child_process`, `fs` are externalized in webpack config
-- API keys stored in `SecretStorage` (never written to settings.json)
+- API keys stored per provider in `SecretStorage` (never written to settings.json)
 - Statistics persisted in `context.globalState` across sessions
-- All API calls use Node.js `https` module (bypasses extension host `fetch` proxy issues)
+- API calls use Node.js `https`/`http` modules (including local Ollama endpoints)
 - HTTP requests are cancellable via `AbortController` wired to VS Code `CancellationToken`
+
+### Git diff safety
+
+- Uses `git diff HEAD` so staged and unstaged changes are analyzed together.
+- Uses Git's empty tree before the first commit, including post-stage working-tree edits.
+- Reads Unicode and renamed paths from NUL-delimited Git metadata.
+- Always excludes lockfiles, build output, images, archives, and minified bundles.
+- Caps each untracked file at 100 lines and 256 KB; binary and symlink targets are omitted.
+- Falls back to a file summary when the tracked patch exceeds the 10 MB collection limit.
 
 ## License
 
