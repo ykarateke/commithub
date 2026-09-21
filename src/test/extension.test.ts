@@ -335,4 +335,87 @@ suite('Git diff reader', () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	test('combines staged and unstaged edits against HEAD', async () => {
+		const root = await createRepo();
+		try {
+			execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+			execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+			await writeFile(path.join(root, 'state.ts'), 'export const state = "initial";\n');
+			execFileSync('git', ['add', '.'], { cwd: root });
+			execFileSync('git', ['commit', '--quiet', '-m', 'initial'], { cwd: root });
+			await writeFile(path.join(root, 'state.ts'), 'export const state = "staged";\n');
+			execFileSync('git', ['add', 'state.ts'], { cwd: root });
+			await writeFile(path.join(root, 'state.ts'), 'export const state = "working";\n');
+
+			const result = await getGitDiffForRoot(root);
+
+			assert.ok(result.files[0].rawDiff.includes('-export const state = "initial";'));
+			assert.ok(result.files[0].rawDiff.includes('+export const state = "working";'));
+			assert.ok(!result.files[0].rawDiff.includes('+export const state = "staged";'));
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test('reports deleted tracked files', async () => {
+		const root = await createRepo();
+		try {
+			execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+			execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+			await writeFile(path.join(root, 'removed.ts'), 'export {};\n');
+			execFileSync('git', ['add', '.'], { cwd: root });
+			execFileSync('git', ['commit', '--quiet', '-m', 'initial'], { cwd: root });
+			execFileSync('git', ['rm', '--quiet', 'removed.ts'], { cwd: root });
+
+			const result = await getGitDiffForRoot(root);
+
+			assert.strictEqual(result.files[0].filePath, 'removed.ts');
+			assert.strictEqual(result.files[0].status, 'deleted');
+			assert.strictEqual(result.files[0].removedLines, 1);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test('applies default excludes to tracked and untracked files', async () => {
+		const root = await createRepo();
+		try {
+			execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+			execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+			await writeFile(path.join(root, 'app.ts'), 'export const value = 1;\n');
+			await writeFile(path.join(root, 'package-lock.json'), '{"version":1}\n');
+			execFileSync('git', ['add', '.'], { cwd: root });
+			execFileSync('git', ['commit', '--quiet', '-m', 'initial'], { cwd: root });
+			await writeFile(path.join(root, 'app.ts'), 'export const value = 2;\n');
+			await writeFile(path.join(root, 'package-lock.json'), '{"version":2}\n');
+			await writeFile(path.join(root, 'ignored.lock'), 'lock\n');
+
+			const result = await getGitDiffForRoot(root);
+
+			assert.deepStrictEqual(result.allFilePaths, ['app.ts']);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	test('omits binary untracked content and truncates by line count', async () => {
+		const root = await createRepo();
+		try {
+			await writeFile(path.join(root, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
+			await writeFile(path.join(root, 'many-lines.txt'), 'one\ntwo\nthree\nfour\n');
+
+			const result = await getGitDiffForRoot(root, [], 2, false);
+			const binary = result.files.find(file => file.filePath === 'binary.dat');
+			const text = result.files.find(file => file.filePath === 'many-lines.txt');
+
+			assert.ok(binary?.rawDiff.includes('[binary file omitted]'));
+			assert.strictEqual(binary?.isTruncated, true);
+			assert.ok(text?.rawDiff.includes('+one\n+two'));
+			assert.ok(!text?.rawDiff.includes('+three'));
+			assert.strictEqual(text?.isTruncated, true);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });
