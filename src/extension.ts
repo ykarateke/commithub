@@ -5,6 +5,7 @@ import * as http from 'http';
 import { setConnectionStatus, recordCall, stats, initState } from './state';
 import { getGitDiff } from './services/git';
 import { generateCommitMessage, streamCommitMessage, CommitUsage } from './services/ai';
+import { apiKeySecretName, getProvider, providers, resolveBaseUrl } from './services/providers';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
@@ -47,20 +48,10 @@ function setInputBoxValue(value: string): void {
 	} catch { /* ignore */ }
 }
 
-const providerBaseUrls: Record<string, string> = {
-	openai: 'https://api.openai.com/v1',
-	anthropic: 'https://api.anthropic.com/v1',
-	google_gemini: 'https://generativelanguage.googleapis.com/v1beta',
-	zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4',
-	zhipu_glm_coding: 'https://open.bigmodel.cn/api/coding/paas/v4',
-	xai_grok: 'https://api.x.ai/v1',
-	deepseek: 'https://api.deepseek.com',
-	mistral: 'https://api.mistral.ai/v1',
-	ollama: 'http://localhost:11434/v1',
-	openrouter: 'https://openrouter.ai/api/v1',
-	groq: 'https://api.groq.com/openai/v1',
-	together: 'https://api.together.xyz/v1',
-};
+async function getApiKey(context: vscode.ExtensionContext, providerId: string): Promise<string | undefined> {
+	if (!getProvider(providerId)?.requiresApiKey) {return undefined;}
+	return context.secrets.get(apiKeySecretName(providerId));
+}
 
 /** Returns a list of { label, description } models fetched from the current provider's API. */
 async function fetchModels(apiKey: string | undefined): Promise<{ label: string; description: string }[] | undefined> {
@@ -177,7 +168,7 @@ async function requireSetup(
 	return false;
 }
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 	console.log('[CommitHub] extension active');
 
 	initState(context);
@@ -196,6 +187,12 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(statusItem);
 
 	const initialProvider = cfg().get<string>('provider', '');
+	const legacyApiKey = await context.secrets.get('commithub.apiKey');
+	if (initialProvider && legacyApiKey && !await context.secrets.get(apiKeySecretName(initialProvider))) {
+		await context.secrets.store(apiKeySecretName(initialProvider), legacyApiKey);
+		await context.secrets.delete('commithub.apiKey');
+		log.info(`[secrets] migrated legacy API key to provider=${initialProvider}`);
+	}
 	if (initialProvider) {
 		setConnectionStatus('connected');
 		statusItem.text = '$(check) CommitHub';
@@ -210,8 +207,9 @@ export function activate(context: vscode.ExtensionContext) {
 					.then(a => { if (a) { vscode.commands.executeCommand('commithub.setProvider'); }});
 				return;
 			}
-			const key = provider === 'ollama' ? '' : (await context.secrets.get('commithub.apiKey'));
-			if (provider !== 'ollama' && !key) {
+			const providerDefinition = getProvider(provider);
+			const key = await getApiKey(context, provider);
+			if (providerDefinition?.requiresApiKey && !key) {
 				vscode.window.showWarningMessage('CommitHub: Set your API Key first', 'Set API Key')
 					.then(a => { if (a) { vscode.commands.executeCommand('commithub.setApiKey'); }});
 				return;
@@ -246,7 +244,7 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 
 					const model = cfg().get<string>('model', 'gpt-4o');
-					const baseUrl = cfg().get<string>('baseUrl', '') || providerBaseUrls[provider] || 'https://api.openai.com/v1';
+					const baseUrl = resolveBaseUrl(provider, cfg().get<string>('baseUrl', ''));
 
 					log.info(`[generateCommit] provider=${provider} model=${model} baseUrl=${baseUrl} files=${git.files.length} totalDiff=+${git.totalAdded}/-${git.totalRemoved}`);
 					const rawTypes = cfg().get<string>('conventionalTypes', '');
@@ -345,7 +343,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.setApiKey', async () => {
-			const existing = await context.secrets.get('commithub.apiKey');
+			const provider = cfg().get<string>('provider', 'openai');
+			const secretName = apiKeySecretName(provider);
+			const existing = await context.secrets.get(secretName);
 			const key = await vscode.window.showInputBox({
 				title: 'CommitHub API Key',
 				prompt: 'Enter your AI provider API key',
@@ -355,10 +355,10 @@ export function activate(context: vscode.ExtensionContext) {
 			});
 			if (key === undefined) {return;}
 			if (key === '') {
-				await context.secrets.delete('commithub.apiKey');
+				await context.secrets.delete(secretName);
 				vscode.window.showInformationMessage('CommitHub: API key cleared');
 			} else {
-				await context.secrets.store('commithub.apiKey', key);
+				await context.secrets.store(secretName, key);
 				vscode.window.showInformationMessage('CommitHub: API key saved');
 				vscode.commands.executeCommand('commithub.testConnection');
 			}
@@ -368,20 +368,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('commithub.setProvider', async () => {
-			const providers = [
-				{ label: 'OpenAI', description: 'GPT-4o, GPT-4o-mini, o3, o4-mini — $2.50/MTok input', id: 'openai' },
-				{ label: 'Anthropic', description: 'Claude Sonnet 4.6, Haiku 4.5, Opus 4.6 — $3/MTok input', id: 'anthropic' },
-				{ label: 'Google Gemini', description: 'Gemini 2.5 Pro, 2.5 Flash — $1.25/MTok input', id: 'google_gemini' },
-				{ label: 'Zhipu GLM', description: 'All models: GLM-4.7-Flash (free), GLM-4.5-Air, GLM-5-Turbo, GLM-5.1', id: 'zhipu_glm' },
-				{ label: 'Zhipu GLM (Coding)', description: 'Coding plan: GLM-4.5-Air, GLM-5-Turbo — optimized for code', id: 'zhipu_glm_coding' },
-				{ label: 'xAI Grok', description: 'Grok 4.1 Fast, Grok 4 — $0.20/MTok input (cheapest!)', id: 'xai_grok' },
-				{ label: 'DeepSeek', description: 'DeepSeek-V4, DeepSeek-R1 — $0.30/MTok input', id: 'deepseek' },
-				{ label: 'Mistral', description: 'Mistral Large, Mistral Small — $2/MTok input', id: 'mistral' },
-				{ label: 'Ollama', description: 'Local LLMs: Llama 3, DeepSeek, Qwen — free & private', id: 'ollama' },
-				{ label: 'OpenRouter', description: 'Multi-provider gateway — 100+ models', id: 'openrouter' },
-				{ label: 'Groq', description: 'Fast inference: Llama 4, Mixtral — ~500 tok/s', id: 'groq' },
-				{ label: 'Together AI', description: 'Open-source models hosted — $0.10-0.80/MTok', id: 'together' },
-			];
 			const pick = await vscode.window.showQuickPick(providers, {
 				title: 'CommitHub AI Provider',
 				placeHolder: 'Select AI provider',
@@ -389,13 +375,13 @@ export function activate(context: vscode.ExtensionContext) {
 			if (!pick) {return;}
 			const id = pick.id;
 			await cfg().update('provider', id, vscode.ConfigurationTarget.Global);
-			const defaultUrl = providerBaseUrls[id] || '';
-			await cfg().update('baseUrl', defaultUrl, vscode.ConfigurationTarget.Global);
+			await cfg().update('baseUrl', '', vscode.ConfigurationTarget.Global);
+			await cfg().update('model', getProvider(id)?.defaultModel || '', vscode.ConfigurationTarget.Global);
 			settingsProvider.refresh();
 			vscode.window.showInformationMessage(`CommitHub: Provider set to ${pick.label}`);
 
-			const apiKey = id === 'ollama' ? '' : (await context.secrets.get('commithub.apiKey'));
-			if (apiKey || id === 'ollama') {
+			const apiKey = await getApiKey(context, id);
+			if (apiKey || !getProvider(id)?.requiresApiKey) {
 				const models = await fetchModels(apiKey);
 				if (models?.length) {
 					const modelPick = await vscode.window.showQuickPick(models, {
@@ -443,7 +429,7 @@ export function activate(context: vscode.ExtensionContext) {
 			statusItem.tooltip = 'Testing API connection';
 			settingsProvider.refresh();
 
-			const apiKey = await context.secrets.get('commithub.apiKey');
+			const apiKey = await getApiKey(context, provider);
 			const baseUrl = cfg().get<string>('baseUrl', '');
 			let testUrl: string | undefined;
 
@@ -526,7 +512,8 @@ export function activate(context: vscode.ExtensionContext) {
 				'commithub.setProvider',
 			);
 			if (!ok) {return;}
-			const apiKey = await context.secrets.get('commithub.apiKey');
+			const provider = cfg().get<string>('provider', '');
+			const apiKey = await getApiKey(context, provider);
 			const models = await fetchModels(apiKey);
 			if (!models) {return;}
 			const pick = await vscode.window.showQuickPick(models, {
@@ -554,10 +541,10 @@ export function activate(context: vscode.ExtensionContext) {
 			const current = cfg().get('model', 'gpt-4o');
 
 			const provider = cfg().get<string>('provider', '');
-			const apiKey = provider === 'ollama' ? '' : (await context.secrets.get('commithub.apiKey'));
+			const apiKey = await getApiKey(context, provider);
 
 			let pick: { label: string; description?: string } | undefined;
-			if (provider !== 'ollama' && apiKey) {
+			if (apiKey || !getProvider(provider)?.requiresApiKey) {
 				const models = await fetchModels(apiKey);
 				if (models?.length) {
 					const selected = await vscode.window.showQuickPick(models, {
@@ -592,7 +579,7 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 			if (!ok) {return;}
 			const provider = cfg().get('provider', '');
-			const defaultUrl = providerBaseUrls[provider] || 'https://api.openai.com/v1';
+			const defaultUrl = getProvider(provider)?.defaultBaseUrl || 'https://api.openai.com/v1';
 			const current = cfg().get('baseUrl', '');
 			const url = await vscode.window.showInputBox({
 				title: 'CommitHub Base URL',
