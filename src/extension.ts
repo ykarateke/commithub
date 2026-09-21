@@ -1,42 +1,16 @@
 import * as vscode from 'vscode';
 import { SettingsProvider } from './views/settingsView';
-import * as https from 'https';
-import * as http from 'http';
 import { setConnectionStatus, recordCall, stats, initState } from './state';
 import { getGitDiff } from './services/git';
 import { generateCommitMessage, streamCommitMessage, CommitUsage } from './services/ai';
 import { apiKeySecretName, getProvider, providers, resolveBaseUrl } from './services/providers';
+import { discoverModels, testProviderConnection } from './services/modelDiscovery';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
 }
 
 const log = vscode.window.createOutputChannel('CommitHub', { log: true });
-
-/** Make an HTTPS/HTTP GET request and return parsed JSON. */
-function httpGetJson(url: string, headers: Record<string, string>): Promise<any> {
-	return new Promise((resolve, reject) => {
-		const mod = url.startsWith('https') ? https : http;
-		const req = mod.get(url, { headers }, (res) => {
-			const chunks: Buffer[] = [];
-			res.on('data', (chunk: Buffer) => chunks.push(chunk));
-			res.on('end', () => {
-				const body = Buffer.concat(chunks).toString();
-				if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
-					reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
-					return;
-				}
-				try {
-					resolve(JSON.parse(body));
-				} catch (e) {
-					reject(new Error(`Invalid JSON: ${body.slice(0, 200)}`));
-				}
-			});
-		});
-		req.on('error', reject);
-		req.setTimeout(15000, () => { req.destroy(); reject(new Error('Request timed out')); });
-	});
-}
 
 function setInputBoxValue(value: string): void {
 	try {
@@ -58,64 +32,16 @@ async function fetchModels(apiKey: string | undefined): Promise<{ label: string;
 	const provider = cfg().get<string>('provider', '');
 	const customBaseUrl = cfg().get<string>('baseUrl', '');
 
-	const knownEndpoints: Record<string, string> = {
-		openai: 'https://api.openai.com/v1/models',
-		anthropic: 'https://api.anthropic.com/v1/models',
-		google_gemini: 'https://generativelanguage.googleapis.com/v1beta/models',
-		zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4/models',
-		xai_grok: 'https://api.x.ai/v1/models',
-		deepseek: 'https://api.deepseek.com/models',
-		mistral: 'https://api.mistral.ai/v1/models',
-		openrouter: 'https://openrouter.ai/api/v1/models',
-		groq: 'https://api.groq.com/openai/v1/models',
-		together: 'https://api.together.xyz/v1/models',
-	};
-
-	let url: string | undefined;
-
-	if (customBaseUrl) {
-		url = customBaseUrl.replace(/\/+$/, '') + '/models';
-	} else {
-		url = knownEndpoints[provider];
-	}
-
-	if (!url) {
-		vscode.window.showInformationMessage(`CommitHub: Model listing not supported for ${provider}. Type model name manually.`);
-		return undefined;
-	}
-
-	log.info(`[fetchModels] GET ${url}`);
-
 	try {
-		const headers: Record<string, string> = {};
-		if (apiKey) {
-			if (provider === 'anthropic') {
-				headers['x-api-key'] = apiKey;
-				headers['anthropic-version'] = '2023-06-01';
-			} else {
-				headers['Authorization'] = `Bearer ${apiKey}`;
-			}
-		}
-		const data: any = await httpGetJson(url, headers);
-
-		let models: { id: string; name?: string; display_name?: string; owned_by?: string; created?: number }[] = [];
-		if (data.data) {models = data.data;}
-		else if (Array.isArray(data)) {models = data;}
-		else if (data.models) {models = data.models;}
-
-		const isGemini = provider === 'google_gemini';
-
-		if (!models || !models.length) {
+		const models = await discoverModels(provider, customBaseUrl, apiKey);
+		if (!models.length) {
 			log.warn('[fetchModels] no models returned');
 			vscode.window.showInformationMessage('CommitHub: No models returned by API. Type model name manually.');
 			return undefined;
 		}
 
 		log.info(`[fetchModels] OK — ${models.length} models`);
-		return models.map(m => ({
-			label: m.id || (m as any).name?.replace(/^models\//, '') || '',
-			description: m.display_name || (m as any).displayName || m.name?.replace(/^models\//, '') || m.owned_by || '',
-		})).filter(m => m.label);
+		return models;
 	} catch (e: any) {
 		log.error(`[fetchModels] FAILED — ${e.message}`);
 		vscode.window.showErrorMessage(`CommitHub: Model fetch failed — ${e.message}`);
@@ -431,62 +357,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			const apiKey = await getApiKey(context, provider);
 			const baseUrl = cfg().get<string>('baseUrl', '');
-			let testUrl: string | undefined;
-
-			if (baseUrl) {
-				testUrl = baseUrl.replace(/\/+$/, '') + '/models';
-			} else {
-				const known: Record<string, string> = {
-					openai: 'https://api.openai.com/v1/models',
-					anthropic: 'https://api.anthropic.com/v1/models',
-					openrouter: 'https://openrouter.ai/api/v1/models',
-					groq: 'https://api.groq.com/openai/v1/models',
-					together: 'https://api.together.xyz/v1/models',
-					deepseek: 'https://api.deepseek.com/models',
-		zhipu_glm: 'https://open.bigmodel.cn/api/paas/v4/models',
-		zhipu_glm_coding: 'https://open.bigmodel.cn/api/coding/paas/v4/models',
-				};
-				testUrl = known[provider];
-			}
-
-			if (!testUrl) {
-				setConnectionStatus('no listing endpoint');
-				statusItem.text = '$(warning) no endpoint';
-				statusItem.tooltip = 'Auto-test not supported for this provider';
-				settingsProvider.refresh();
-				vscode.window.showInformationMessage(`CommitHub: Auto-test not supported for ${provider}.`);
-				return;
-			}
 
 			try {
-				const headers: Record<string, string> = {};
-				if (apiKey) {
-					if (provider === 'anthropic') {
-						headers['x-api-key'] = apiKey;
-						headers['anthropic-version'] = '2023-06-01';
-					} else {
-						headers['Authorization'] = `Bearer ${apiKey}`;
-					}
-				}
-				log.info(`[testConnection] GET ${testUrl}`);
-				const mod = testUrl.startsWith('https') ? https : http;
-				await new Promise<void>((resolve, reject) => {
-					const req = mod.get(testUrl!, { headers, timeout: 10000 }, (res) => {
-						let body = '';
-						res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-						res.on('end', () => {
-							if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-								resolve();
-							} else {
-								const err = `HTTP ${res.statusCode}: ${body.slice(0, 200)}`;
-								log.error(`[testConnection] ${err}`);
-								reject(new Error(err));
-							}
-						});
-					});
-					req.on('error', (e) => { log.error(`[testConnection] ${e.message}`); reject(e); });
-					req.on('timeout', () => { req.destroy(); log.warn('[testConnection] timed out'); reject(new Error('timed out')); });
-				});
+				await testProviderConnection(provider, baseUrl, apiKey);
 				log.info('[testConnection] OK');
 				setConnectionStatus('connected');
 				statusItem.text = '$(check) CommitHub';
