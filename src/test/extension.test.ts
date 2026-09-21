@@ -8,6 +8,7 @@ import * as path from 'path';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import { getGitDiffForRoot } from '../services/git';
+import { filterAndSortModels } from '../services/modelDiscovery';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -16,6 +17,29 @@ suite('Extension Test Suite', () => {
 	test('Sample test', () => {
 		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
 		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+	});
+});
+
+suite('Model discovery', () => {
+	test('filters non-text models and prioritizes the provider default', () => {
+		const models = filterAndSortModels([
+			{ id: 'text-embedding-3-small' },
+			{ id: 'gpt-image-1' },
+			{ id: 'chat-fast' },
+			{ id: 'preferred-chat' },
+		], 'preferred-chat');
+
+		assert.deepStrictEqual(models.map(model => model.label), ['preferred-chat', 'chat-fast']);
+	});
+
+	test('uses Gemini generation capabilities and removes duplicate model names', () => {
+		const models = filterAndSortModels([
+			{ name: 'models/gemini-flash', supportedGenerationMethods: ['generateContent'] },
+			{ name: 'models/gemini-flash', supportedGenerationMethods: ['generateContent'] },
+			{ name: 'models/gemini-embedding', supportedGenerationMethods: ['embedContent'] },
+		], 'gemini-flash');
+
+		assert.deepStrictEqual(models.map(model => model.label), ['gemini-flash']);
 	});
 });
 

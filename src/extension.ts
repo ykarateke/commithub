@@ -4,7 +4,7 @@ import { setConnectionStatus, recordCall, stats, initState } from './state';
 import { getGitDiff } from './services/git';
 import { generateCommitMessage, streamCommitMessage, CommitUsage } from './services/ai';
 import { apiKeySecretName, getProvider, providers, resolveBaseUrl } from './services/providers';
-import { discoverModels, testProviderConnection } from './services/modelDiscovery';
+import { clearModelCache, discoverModels, testProviderConnection } from './services/modelDiscovery';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
@@ -282,9 +282,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (key === undefined) {return;}
 			if (key === '') {
 				await context.secrets.delete(secretName);
+				clearModelCache(provider);
 				vscode.window.showInformationMessage('CommitHub: API key cleared');
 			} else {
 				await context.secrets.store(secretName, key);
+				clearModelCache(provider);
 				vscode.window.showInformationMessage('CommitHub: API key saved');
 				vscode.commands.executeCommand('commithub.testConnection');
 			}
@@ -463,6 +465,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			});
 			if (url === undefined) {return;}
 			await cfg().update('baseUrl', url, vscode.ConfigurationTarget.Global);
+			clearModelCache(provider);
 			vscode.window.showInformationMessage(url ? `CommitHub: Base URL set` : 'CommitHub: Using default API URL');
 			settingsProvider.refresh();
 		})
