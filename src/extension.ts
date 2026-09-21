@@ -113,6 +113,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(statusItem);
 
 	const initialProvider = cfg().get<string>('provider', '');
+	const initialModel = cfg().get<string>('model', '');
+	if (initialProvider === 'deepseek' && ['deepseek-chat', 'deepseek-reasoner'].includes(initialModel)) {
+		await cfg().update('model', 'deepseek-flash', vscode.ConfigurationTarget.Global);
+		await cfg().update('modelProfile', initialModel === 'deepseek-reasoner' ? 'quality' : 'balanced', vscode.ConfigurationTarget.Global);
+		log.info(`[settings] migrated retired DeepSeek model ${initialModel} to deepseek-flash`);
+	}
 	const legacyApiKey = await context.secrets.get('commithub.apiKey');
 	if (initialProvider && legacyApiKey && !await context.secrets.get(apiKeySecretName(initialProvider))) {
 		await context.secrets.store(apiKeySecretName(initialProvider), legacyApiKey);
@@ -194,6 +200,7 @@ export async function activate(context: vscode.ExtensionContext) {
 						breakingChanges: cfg().get('breakingChanges', true),
 						temperature: cfg().get('temperature', 0.7),
 						maxTokens: cfg().get('maxTokens', 500),
+						modelProfile: cfg().get<ModelProfile>('modelProfile', 'balanced'),
 						conventionalTypes: rawTypes ? rawTypes.split(',').map(s => s.trim()).filter(Boolean) : [],
 					};
 

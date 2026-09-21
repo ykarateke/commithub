@@ -21,6 +21,7 @@ interface CommitSettings {
   maxTokens: number;
   maxDiffSize: number;
   conventionalTypes: string[];
+  modelProfile: 'fast' | 'balanced' | 'quality' | 'manual';
 }
 
 const langNames: Record<string, string> = {
@@ -188,7 +189,7 @@ export async function generateCommitMessage(
 
   try {
     const adapter = getProviderAdapter(provider);
-    const request = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: false });
+    const request = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: false, modelProfile: settings.modelProfile });
     const data = await requestJson(request.url, request.body, request.headers, 60000, signal);
     const parsed = adapter.parseResponse(data);
     return {
@@ -214,7 +215,7 @@ export async function* streamCommitMessage(
   const prompt = buildPrompt(settings);
   const adapter = getProviderAdapter(provider);
   const config = adapter.protocol;
-  const streamRequest = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: true });
+  const streamRequest = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: true, modelProfile: settings.modelProfile });
 
   let fullText = '';
   let chunkCount = 0;

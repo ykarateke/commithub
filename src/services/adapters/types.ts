@@ -7,6 +7,7 @@ export interface AdapterOptions {
 	temperature: number;
 	maxTokens: number;
 	stream: boolean;
+	modelProfile: 'fast' | 'balanced' | 'quality' | 'manual';
 }
 
 export interface AdapterRequest {

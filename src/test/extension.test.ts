@@ -62,7 +62,7 @@ suite('Model discovery', () => {
 suite('AI provider adapters', () => {
 	const options = {
 		provider: 'openai', baseUrl: 'https://example.test/v1/', model: 'test-model', apiKey: 'secret',
-		prompt: 'prompt', temperature: 0.2, maxTokens: 321, stream: false,
+		prompt: 'prompt', temperature: 0.2, maxTokens: 321, stream: false, modelProfile: 'balanced' as const,
 	};
 
 	test('builds OpenAI-compatible requests', () => {
@@ -104,6 +104,23 @@ suite('AI provider adapters', () => {
 			type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 4 },
 		}), { text: undefined, inputTokens: undefined, outputTokens: 4, finishReason: 'end_turn' });
 	});
+
+	test('configures DeepSeek thinking mode from model profile', () => {
+		const adapter = getProviderAdapter('deepseek');
+		const fast = adapter.createRequest({ ...options, provider: 'deepseek', model: 'deepseek-flash', modelProfile: 'fast' });
+		assert.deepStrictEqual(fast.body.thinking, { type: 'disabled' });
+		assert.strictEqual(fast.body.temperature, 0.2);
+
+		const quality = adapter.createRequest({ ...options, provider: 'deepseek', model: 'deepseek-v4-pro', modelProfile: 'quality' });
+		assert.deepStrictEqual(quality.body.thinking, { type: 'enabled' });
+		assert.strictEqual(quality.body.reasoning_effort, 'high');
+		assert.strictEqual(quality.body.temperature, undefined);
+
+		assert.deepStrictEqual(adapter.parseStreamEvent({
+			choices: [{ delta: { reasoning_content: 'analysis' }, finish_reason: null }],
+			usage: { prompt_tokens: 12, completion_tokens: 6 },
+		}), { text: undefined, reasoning: true, inputTokens: 12, outputTokens: 6, finishReason: undefined });
+	});
 });
 
 suite('AI HTTP transport', () => {
@@ -114,7 +131,7 @@ suite('AI HTTP transport', () => {
 		files: [], totalAdded: 1, totalRemoved: 0, summaryStats: 'app.ts | 1 +', language: 'en',
 		maxLength: 72, conventionalCommit: true, includeBody: false, includeFooter: false,
 		emoji: false, tone: 'technical', scopeDetection: true, breakingChanges: true,
-		temperature: 0.2, maxTokens: 100, maxDiffSize: 1000, conventionalTypes: ['fix'],
+		temperature: 0.2, maxTokens: 100, maxDiffSize: 1000, conventionalTypes: ['fix'], modelProfile: 'balanced' as const,
 	};
 
 	suiteSetup(async () => {
