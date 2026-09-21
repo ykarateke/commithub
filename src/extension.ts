@@ -16,12 +16,12 @@ const log = vscode.window.createOutputChannel('CommitHub', { log: true });
 function setInputBoxValue(value: string, repoRoot: string): void {
 	try {
 		const gitExt = vscode.extensions.getExtension('vscode.git');
-		if (!gitExt?.exports) return;
+		if (!gitExt?.exports) {return;}
 		const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
 		const repo = gitApi?.repositories?.find((candidate: any) =>
 			path.resolve(candidate.rootUri.fsPath) === path.resolve(repoRoot)
 		);
-		if (repo?.inputBox) repo.inputBox.value = value;
+		if (repo?.inputBox) {repo.inputBox.value = value;}
 	} catch { /* ignore */ }
 }
 

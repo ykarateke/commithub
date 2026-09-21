@@ -103,7 +103,7 @@ function isPathInside(root: string, candidate: string): boolean {
 export function resolveGitRoot(candidatePath: string): string | undefined {
   try {
     const gitExt = vscode.extensions.getExtension('vscode.git');
-    if (!gitExt?.exports) return undefined;
+    if (!gitExt?.exports) {return undefined;}
     const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
     const matchingRoots = (gitApi?.repositories || [])
       .map((repo: any) => repo.rootUri.fsPath as string)
@@ -149,7 +149,7 @@ function parseDiffOutput(raw: string, changedFiles: ChangedFile[]): FileDiff[] {
 
     for (const hunkBlock of hunkBlocks) {
       const headerMatch = hunkBlock.match(/^(@@ .+ @@)(.*)$/m);
-      if (!headerMatch) continue;
+      if (!headerMatch) {continue;}
       const header = headerMatch[1];
       const funcName = (headerMatch[2] || '').trim();
       const content = hunkBlock;
@@ -157,8 +157,8 @@ function parseDiffOutput(raw: string, changedFiles: ChangedFile[]): FileDiff[] {
       let added = 0, removed = 0;
       const lines = hunkBlock.split('\n');
       for (const line of lines) {
-        if (line.startsWith('+')) added++;
-        else if (line.startsWith('-')) removed++;
+        if (line.startsWith('+')) {added++;}
+        else if (line.startsWith('-')) {removed++;}
       }
 
       hunks.push({ header, content, funcName, addedLines: added, removedLines: removed });
@@ -209,7 +209,7 @@ function buildExcludePathspecs(
     ? [...new Set([...AUTO_EXCLUDE_DEFAULTS, ...userPatterns])]
     : userPatterns;
 
-  if (!patterns.length) return [];
+  if (!patterns.length) {return [];}
   return ['--', ...patterns.map(p => `:(exclude)${p}`)];
 }
 

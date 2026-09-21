@@ -41,7 +41,7 @@ const toneNames: Record<string, string> = {
 };
 
 function buildDiffSection(files: FileDiff[], maxDiffSize: number): string {
-  if (!files.length) return '(no tracked changes — see new files above)';
+  if (!files.length) {return '(no tracked changes — see new files above)';}
 
   const totalSize = files.reduce((s, f) => s + f.rawDiff.length, 0);
 
@@ -68,7 +68,7 @@ function buildDiffSection(files: FileDiff[], maxDiffSize: number): string {
   });
   const skipped = files.filter(f => !included.includes(f));
 
-  if (!skipped.length) return included.map(f => f.rawDiff).join('\n');
+  if (!skipped.length) {return included.map(f => f.rawDiff).join('\n');}
 
   return [
     included.map(f => f.rawDiff).join('\n'),
@@ -103,25 +103,25 @@ function buildPrompt(s: CommitSettings): string {
     parts.push('', `## Rules`);
     parts.push(`- Format: type(scope): subject`);
     parts.push(`- Types: ${types}`);
-    if (s.scopeDetection) parts.push(`- Scope from file paths`);
-    if (s.includeBody) parts.push(`- Body after blank line, wrap at 72`);
-    if (s.breakingChanges) parts.push(`- BREAKING CHANGE: footer if breaking`);
+    if (s.scopeDetection) {parts.push(`- Scope from file paths`);}
+    if (s.includeBody) {parts.push(`- Body after blank line, wrap at 72`);}
+    if (s.breakingChanges) {parts.push(`- BREAKING CHANGE: footer if breaking`);}
   } else {
     parts.push('', `## Rules`);
     parts.push(`- Subject line only`);
-    if (s.includeBody) parts.push(`- Body after blank line`);
+    if (s.includeBody) {parts.push(`- Body after blank line`);}
   }
 
   parts.push(`- Subject max: ${s.maxLength} chars`);
-  if (s.emoji) parts.push(`- Emoji prefix`);
-  if (s.tone !== 'auto' && toneNames[s.tone]) parts.push(`- Tone: ${toneNames[s.tone]}`);
+  if (s.emoji) {parts.push(`- Emoji prefix`);}
+  if (s.tone !== 'auto' && toneNames[s.tone]) {parts.push(`- Tone: ${toneNames[s.tone]}`);}
   parts.push('', `Output ONLY the commit message. No markdown.`);
 
   return parts.join('\n');
 }
 
 async function checkStreamError(stream: http.IncomingMessage): Promise<void> {
-  if (stream.statusCode && stream.statusCode >= 200 && stream.statusCode < 300) return;
+  if (stream.statusCode && stream.statusCode >= 200 && stream.statusCode < 300) {return;}
   const errBody = await new Promise<string>(resolve => {
     const parts: Buffer[] = [];
     stream.on('data', (c: Buffer) => parts.push(c));
@@ -134,16 +134,16 @@ async function* parseSseLines(stream: http.IncomingMessage, cancelled: boolean):
   let buffer = '';
   let finished = false;
   for await (const chunk of stream) {
-    if (cancelled) break;
+    if (cancelled) {break;}
     buffer += chunk.toString();
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) continue;
+      if (!trimmed) {continue;}
       yield trimmed;
     }
-    if (finished) break;
+    if (finished) {break;}
   }
 }
 
@@ -163,7 +163,7 @@ async function* streamAdapterEvents(
       loggedFirstLine = true;
       logFn(`[stream debug] first SSE line: "${line.slice(0, 300)}"`);
     }
-    if (!line.startsWith('data:')) continue;
+    if (!line.startsWith('data:')) {continue;}
     const json = line.slice(5).trim();
     if (json === '[DONE]') {break;}
     try {
