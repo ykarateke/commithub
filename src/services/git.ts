@@ -39,10 +39,6 @@ const AUTO_EXCLUDE_DEFAULTS = [
   '*.min.js', '*.min.css', '*.bundle.js',
 ];
 
-let diffCache: { key: string; result: GitDiffResult } | undefined;
-
-let _cachedRoot: string = '';
-
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
@@ -143,10 +139,6 @@ function buildExcludePathspecs(
   return ['--', ...patterns.map(p => `:(exclude)${p}`)];
 }
 
-function buildCacheKey(root: string): Promise<string> {
-  return execGit(['status', '--porcelain', '-u'], root).then(out => out.trim()).catch(() => '');
-}
-
 export async function getGitDiff(
   _cwd: string,
   userExcludePatterns: string[] = [],
@@ -168,11 +160,6 @@ export async function getGitDiffForRoot(
   includeAutoExcludes = true,
 ): Promise<GitDiffResult> {
   const excludePathspecs = buildExcludePathspecs(userExcludePatterns, includeAutoExcludes);
-
-  const cacheKey = await buildCacheKey(root);
-  if (diffCache && diffCache.key === cacheKey && _cachedRoot === root) {
-    return diffCache.result;
-  }
 
   const hasHead = await execGit(['rev-parse', '--verify', 'HEAD'], root)
     .then(() => true)
@@ -253,11 +240,6 @@ export async function getGitDiffForRoot(
     summaryStats,
     allFilePaths: allFiles.map(f => f.filePath),
   };
-
-  if (cacheKey) {
-    diffCache = { key: cacheKey, result };
-    _cachedRoot = root;
-  }
 
   return result;
 }

@@ -260,4 +260,26 @@ suite('Git diff reader', () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	test('returns fresh diff content when a modified file changes again', async () => {
+		const root = await createRepo();
+		try {
+			execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+			execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+			await writeFile(path.join(root, 'app.ts'), 'const value = 1;\n');
+			execFileSync('git', ['add', '--', 'app.ts'], { cwd: root });
+			execFileSync('git', ['commit', '--quiet', '-m', 'initial'], { cwd: root });
+
+			await writeFile(path.join(root, 'app.ts'), 'const value = 2;\n');
+			const first = await getGitDiffForRoot(root);
+			await writeFile(path.join(root, 'app.ts'), 'const value = 3;\n');
+			const second = await getGitDiffForRoot(root);
+
+			assert.ok(first.files[0].rawDiff.includes('+const value = 2;'));
+			assert.ok(second.files[0].rawDiff.includes('+const value = 3;'));
+			assert.ok(!second.files[0].rawDiff.includes('+const value = 2;'));
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });
