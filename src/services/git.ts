@@ -62,14 +62,21 @@ async function readFileLines(filePath: string, maxLines: number): Promise<{ cont
   return { content: included.join('\n'), lineCount };
 }
 
-function getRepo(): { root: string } | undefined {
+function isPathInside(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+export function resolveGitRoot(candidatePath: string): string | undefined {
   try {
     const gitExt = vscode.extensions.getExtension('vscode.git');
     if (!gitExt?.exports) return undefined;
     const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
-    const repo = gitApi?.repositories?.[0];
-    if (!repo) return undefined;
-    return { root: repo.rootUri.fsPath };
+    const matchingRoots = (gitApi?.repositories || [])
+      .map((repo: any) => repo.rootUri.fsPath as string)
+      .filter((root: string) => isPathInside(root, candidatePath))
+      .sort((a: string, b: string) => b.length - a.length);
+    return matchingRoots[0];
   } catch { return undefined; }
 }
 
@@ -140,17 +147,17 @@ function buildExcludePathspecs(
 }
 
 export async function getGitDiff(
-  _cwd: string,
+  cwd: string,
   userExcludePatterns: string[] = [],
   untrackedMaxLines = 100,
   includeAutoExcludes = true,
 ): Promise<GitDiffResult> {
-  const repoInfo = getRepo();
-  if (!repoInfo) {
+  const root = resolveGitRoot(cwd);
+  if (!root) {
     throw new Error('Not a git repository — open a git project to use CommitHub');
   }
 
-  return getGitDiffForRoot(repoInfo.root, userExcludePatterns, untrackedMaxLines, includeAutoExcludes);
+  return getGitDiffForRoot(root, userExcludePatterns, untrackedMaxLines, includeAutoExcludes);
 }
 
 export async function getGitDiffForRoot(

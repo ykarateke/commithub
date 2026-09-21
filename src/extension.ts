@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { SettingsProvider } from './views/settingsView';
 import { setConnectionStatus, recordCall, stats, initState } from './state';
-import { getGitDiff } from './services/git';
+import { getGitDiffForRoot, resolveGitRoot } from './services/git';
 import { generateCommitMessage, streamCommitMessage, CommitUsage } from './services/ai';
 import { apiKeySecretName, getProvider, providers, resolveBaseUrl } from './services/providers';
 import { clearModelCache, discoverModels, ModelProfile, recommendModel, testProviderConnection } from './services/modelDiscovery';
@@ -12,12 +13,14 @@ function cfg() {
 
 const log = vscode.window.createOutputChannel('CommitHub', { log: true });
 
-function setInputBoxValue(value: string): void {
+function setInputBoxValue(value: string, repoRoot: string): void {
 	try {
 		const gitExt = vscode.extensions.getExtension('vscode.git');
 		if (!gitExt?.exports) return;
 		const gitApi = typeof gitExt.exports.getAPI === 'function' ? gitExt.exports.getAPI(1) : gitExt.exports;
-		const repo = gitApi?.repositories?.[0];
+		const repo = gitApi?.repositories?.find((candidate: any) =>
+			path.resolve(candidate.rootUri.fsPath) === path.resolve(repoRoot)
+		);
 		if (repo?.inputBox) repo.inputBox.value = value;
 	} catch { /* ignore */ }
 }
@@ -147,9 +150,14 @@ export async function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-			if (!workspaceRoot) {
-				vscode.window.showErrorMessage('CommitHub: No workspace folder open');
+			const workspaceFolders = vscode.workspace.workspaceFolders || [];
+			const activeFile = vscode.window.activeTextEditor?.document.uri.scheme === 'file'
+				? vscode.window.activeTextEditor.document.uri.fsPath
+				: undefined;
+			const repoRoot = (activeFile ? resolveGitRoot(activeFile) : undefined)
+				|| workspaceFolders.map(folder => resolveGitRoot(folder.uri.fsPath)).find(Boolean);
+			if (!repoRoot) {
+				vscode.window.showErrorMessage('CommitHub: No Git repository found for the active file or workspace');
 				return;
 			}
 
@@ -167,7 +175,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				cancellable: true,
 			}, async (progress, token) => {
 				try {
-					const git = await getGitDiff(workspaceRoot, excludePatterns, untrackedMaxLines, true);
+					const git = await getGitDiffForRoot(repoRoot, excludePatterns, untrackedMaxLines, true);
 					if (!git.hasChanges) {
 						vscode.window.showInformationMessage('CommitHub: No changes detected to commit');
 						statusItem.text = '$(plug) CommitHub';
@@ -225,10 +233,10 @@ export async function activate(context: vscode.ExtensionContext) {
 							hasFirstChunk = true;
 							log.info(`[generateCommit] TTFT (first chunk in SCM) = ${now - t0}ms`);
 							progress.report({ message: '✍️ Writing commit message...' });
-							setInputBoxValue(fullText);
+							setInputBoxValue(fullText, repoRoot);
 							lastUiUpdate = now;
 						} else if (now - lastUiUpdate >= UI_THROTTLE_MS) {
-							setInputBoxValue(fullText);
+							setInputBoxValue(fullText, repoRoot);
 							lastUiUpdate = now;
 						}
 						iterResult = await iterator.next();
@@ -243,7 +251,7 @@ export async function activate(context: vscode.ExtensionContext) {
 						return;
 					}
 
-					setInputBoxValue(finalText);
+					setInputBoxValue(finalText, repoRoot);
 
 					log.info(`[generateCommit] COMPLETE — totalE2E=${totalMs}ms responseLen=${finalText.length} chars inputTokens=${returnVal?.usage.inputTokens ?? '-'} outputTokens=${returnVal?.usage.outputTokens ?? '-'}`);
 
