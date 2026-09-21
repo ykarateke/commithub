@@ -299,4 +299,25 @@ suite('Git diff reader', () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	test('preserves Unicode paths and rename destinations', async () => {
+		const root = await createRepo();
+		try {
+			execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+			execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+			await writeFile(path.join(root, 'şifre dosyası.ts'), 'export const value = 1;\nexport const stable = true;\n');
+			execFileSync('git', ['add', '.'], { cwd: root });
+			execFileSync('git', ['commit', '--quiet', '-m', 'initial'], { cwd: root });
+			execFileSync('git', ['mv', 'şifre dosyası.ts', 'yeni şifre.ts'], { cwd: root });
+			await writeFile(path.join(root, 'yeni şifre.ts'), 'export const value = 2;\nexport const stable = true;\n');
+
+			const result = await getGitDiffForRoot(root);
+
+			assert.deepStrictEqual(result.allFilePaths, ['yeni şifre.ts']);
+			assert.strictEqual(result.files[0].status, 'renamed');
+			assert.ok(result.files[0].rawDiff.includes('+export const value = 2;'));
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });

@@ -31,6 +31,11 @@ export interface GitDiffResult {
   allFilePaths: string[];
 }
 
+type ChangedFile = {
+  filePath: string;
+  status: FileDiff['status'];
+};
+
 const AUTO_EXCLUDE_DEFAULTS = [
   '*.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
   '*.png', '*.jpg', '*.jpeg', '*.gif', '*.svg', '*.ico', '*.webp',
@@ -83,19 +88,36 @@ export function resolveGitRoot(candidatePath: string): string | undefined {
   } catch { return undefined; }
 }
 
-function parseDiffOutput(raw: string): FileDiff[] {
+function parseNameStatus(raw: string): ChangedFile[] {
+  const fields = raw.split('\0');
+  const changed: ChangedFile[] = [];
+  let index = 0;
+  while (index < fields.length && fields[index]) {
+    const code = fields[index++];
+    const kind = code[0];
+    if (kind === 'R' || kind === 'C') {
+      index++;
+      const destination = fields[index++];
+      if (destination) {changed.push({ filePath: destination, status: 'renamed' });}
+      continue;
+    }
+    const filePath = fields[index++];
+    if (!filePath) {continue;}
+    const status: FileDiff['status'] = kind === 'A' ? 'added' : kind === 'D' ? 'deleted' : 'modified';
+    changed.push({ filePath, status });
+  }
+  return changed;
+}
+
+function parseDiffOutput(raw: string, changedFiles: ChangedFile[]): FileDiff[] {
   const files: FileDiff[] = [];
   const fileBlocks = raw.split(/\n(?=diff --git )/).filter(Boolean);
 
-  for (const block of fileBlocks) {
-    const pathMatch = block.match(/^diff --git a\/(.*?) b\/(.*?)$/m);
-    if (!pathMatch) continue;
-    const filePath = pathMatch[2];
-
-    let status: FileDiff['status'] = 'modified';
-    if (/^new file mode/m.test(block)) status = 'added';
-    else if (/^deleted file mode/m.test(block)) status = 'deleted';
-    else if (/^rename from /m.test(block)) status = 'renamed';
+  for (let blockIndex = 0; blockIndex < fileBlocks.length; blockIndex++) {
+    const block = fileBlocks[blockIndex];
+    const changedFile = changedFiles[blockIndex];
+    if (!changedFile) {continue;}
+    const { filePath, status } = changedFile;
 
     const hunks: HunkInfo[] = [];
     const hunkBlocks = block.split(/\n(?=@@ )/).filter(h => h.startsWith('@@ '));
@@ -179,12 +201,13 @@ export async function getGitDiffForRoot(
     : (await execGit(['hash-object', '-t', 'tree', '--stdin'], root, '')).trim();
   const diffArgs = ['diff', baseRevision, '-U2', ...excludePathspecs];
 
-  const [trackedDiff, untrackedRaw] = await Promise.all([
+  const [trackedDiff, nameStatusRaw, untrackedRaw] = await Promise.all([
     execGit(diffArgs, root),
+    execGit(['diff', '--name-status', '-z', baseRevision, ...excludePathspecs], root),
     execGit(['ls-files', '--others', '--exclude-standard', '-z', ...excludePathspecs], root),
   ]);
 
-  const trackedFiles = parseDiffOutput(trackedDiff);
+  const trackedFiles = parseDiffOutput(trackedDiff, parseNameStatus(nameStatusRaw));
 
   const untrackedFileList = untrackedRaw.split('\0').filter(Boolean);
 
