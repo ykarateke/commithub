@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { getGitDiffForRoot } from '../services/git';
 import { filterAndSortModels, recommendModel } from '../services/modelDiscovery';
+import { getProviderAdapter } from '../services/adapters';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -51,6 +52,42 @@ suite('Model discovery', () => {
 		assert.strictEqual(recommendModel(models, 'fast', 'provider-standard')?.label, 'provider-mini');
 		assert.strictEqual(recommendModel(models, 'balanced', 'provider-standard')?.label, 'provider-standard');
 		assert.strictEqual(recommendModel(models, 'quality', 'provider-standard')?.label, 'provider-pro');
+	});
+});
+
+suite('AI provider adapters', () => {
+	const options = {
+		provider: 'openai', baseUrl: 'https://example.test/v1/', model: 'test-model', apiKey: 'secret',
+		prompt: 'prompt', temperature: 0.2, maxTokens: 321, stream: false,
+	};
+
+	test('builds OpenAI-compatible requests', () => {
+		const adapter = getProviderAdapter('openai');
+		const request = adapter.createRequest({ ...options, stream: true });
+		assert.strictEqual(request.url, 'https://example.test/v1/chat/completions');
+		assert.strictEqual(request.headers.Authorization, 'Bearer secret');
+		assert.strictEqual(request.body.stream, true);
+		assert.deepStrictEqual(request.body.stream_options, { include_usage: true });
+	});
+
+	test('builds Gemini generation config and parses all text parts', () => {
+		const adapter = getProviderAdapter('google_gemini');
+		const request = adapter.createRequest({ ...options, provider: 'google_gemini' });
+		assert.strictEqual(request.url, 'https://example.test/v1/models/test-model:generateContent');
+		assert.deepStrictEqual(request.body.generationConfig, { temperature: 0.2, maxOutputTokens: 321 });
+		const response = adapter.parseResponse({ candidates: [{ content: { parts: [{ text: 'one' }, { text: ' two' }] } }] });
+		assert.strictEqual(response.text, 'one two');
+	});
+
+	test('parses Anthropic stop reason and usage from response root', () => {
+		const adapter = getProviderAdapter('anthropic');
+		const response = adapter.parseResponse({
+			content: [{ type: 'text', text: 'result' }], stop_reason: 'end_turn',
+			usage: { input_tokens: 10, output_tokens: 4 },
+		});
+		assert.deepStrictEqual(response, {
+			text: 'result', finishReason: 'end_turn', inputTokens: 10, outputTokens: 4,
+		});
 	});
 });
 

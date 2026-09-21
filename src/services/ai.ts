@@ -1,6 +1,7 @@
 import * as https from 'https';
 import * as http from 'http';
 import { FileDiff } from './git';
+import { getProviderAdapter } from './adapters';
 
 interface CommitSettings {
   files: FileDiff[];
@@ -310,67 +311,16 @@ export async function generateCommitMessage(
 ): Promise<{ text: string; usage: CommitUsage; finishReason: string }> {
   const prompt = buildPrompt(settings);
 
-  const providerConfig = provider === 'anthropic' ? 'anthropic' : provider === 'google_gemini' ? 'gemini' : 'openai';
-
   try {
-    let commitMsg: string;
-    let usage: CommitUsage = { inputTokens: 0, outputTokens: 0 };
-    let finishReason = '';
-
-    if (providerConfig === 'anthropic') {
-      const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
-      const body = {
-        model,
-        max_tokens: settings.maxTokens,
-        system: prompt,
-        messages: [{ role: 'user', content: 'Generate the commit message now.' }],
-      };
-      const headers: Record<string, string> = {
-        'x-api-key': apiKey || '',
-        'anthropic-version': '2023-06-01',
-      };
-      const data = await postJson(url, body, headers, 60000, signal);
-      commitMsg = data?.content?.[0]?.text || '';
-      finishReason = data?.content?.[0]?.stop_reason || data?.content?.[0]?.stop_sequence || '';
-      usage = {
-        inputTokens: data?.usage?.input_tokens ?? 0,
-        outputTokens: data?.usage?.output_tokens ?? 0,
-      };
-    } else if (providerConfig === 'gemini') {
-      const url = `${baseUrl.replace(/\/+$/, '')}/models/${model}:generateContent`;
-      const body = {
-        contents: [{ role: 'user', parts: [{ text: prompt + '\n\nGenerate the commit message now.' }] }],
-      };
-      const headers: Record<string, string> = { 'x-goog-api-key': apiKey || '' };
-      const data = await postJson(url, body, headers, 60000, signal);
-      commitMsg = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      finishReason = data?.candidates?.[0]?.finishReason || '';
-      usage = {
-        inputTokens: data?.usageMetadata?.promptTokenCount ?? 0,
-        outputTokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
-      };
-    } else {
-      const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-      const body = {
-        model,
-        messages: [
-          { role: 'system', content: prompt },
-          { role: 'user', content: 'Generate the commit message now.' },
-        ],
-        temperature: settings.temperature,
-        max_tokens: settings.maxTokens,
-      };
-      const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey || ''}` };
-      const data = await postJson(url, body, headers, 60000, signal);
-      commitMsg = data?.choices?.[0]?.message?.content || '';
-      finishReason = data?.choices?.[0]?.finish_reason || '';
-      usage = {
-        inputTokens: data?.usage?.prompt_tokens ?? 0,
-        outputTokens: data?.usage?.completion_tokens ?? 0,
-      };
-    }
-
-    return { text: commitMsg.trim(), usage, finishReason };
+    const adapter = getProviderAdapter(provider);
+    const request = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: false });
+    const data = await postJson(request.url, request.body, request.headers, 60000, signal);
+    const parsed = adapter.parseResponse(data);
+    return {
+      text: parsed.text.trim(),
+      usage: { inputTokens: parsed.inputTokens, outputTokens: parsed.outputTokens },
+      finishReason: parsed.finishReason,
+    };
   } catch (e: any) {
     if (e.message === 'Canceled') { throw e; }
     throw new Error(`AI request failed: ${e.message}`);
@@ -388,8 +338,9 @@ export async function* streamCommitMessage(
 ): AsyncGenerator<string, { text: string; usage: CommitUsage; finishReason: string }, undefined> {
   const promptStart = Date.now();
   const prompt = buildPrompt(settings);
-  const config = provider === 'anthropic' ? 'anthropic' : provider === 'google_gemini' ? 'gemini' : 'openai';
-  const cleanUrl = baseUrl.replace(/\/+$/, '');
+  const adapter = getProviderAdapter(provider);
+  const config = adapter.protocol;
+  const streamRequest = adapter.createRequest({ provider, baseUrl, model, apiKey, prompt, temperature: settings.temperature, maxTokens: settings.maxTokens, stream: true });
 
   let fullText = '';
   let chunkCount = 0;
@@ -399,19 +350,8 @@ export async function* streamCommitMessage(
 
   try {
     if (config === 'anthropic') {
-      const url = `${cleanUrl}/messages`;
-      const body = {
-        model,
-        max_tokens: settings.maxTokens,
-        system: prompt,
-        messages: [{ role: 'user', content: 'Generate the commit message now.' }],
-      };
-      const headers: Record<string, string> = {
-        'x-api-key': apiKey || '',
-        'anthropic-version': '2023-06-01',
-      };
       const reqStart = Date.now();
-      for await (const chunk of streamPostAnthropic(url, body, headers, signal)) {
+      for await (const chunk of streamPostAnthropic(streamRequest.url, streamRequest.body, streamRequest.headers, signal)) {
         if (!ttft) { ttft = Date.now() - reqStart; }
         chunkCount++;
         fullText += chunk;
@@ -423,13 +363,8 @@ export async function* streamCommitMessage(
     }
 
     if (config === 'gemini') {
-      const url = `${cleanUrl}/models/${model}:generateContent`;
-      const body = {
-        contents: [{ role: 'user', parts: [{ text: prompt + '\n\nGenerate the commit message now.' }] }],
-      };
-      const headers: Record<string, string> = { 'x-goog-api-key': apiKey || '' };
       const reqStart = Date.now();
-      for await (const chunk of streamPostGemini(url, body, headers, signal)) {
+      for await (const chunk of streamPostGemini(streamRequest.url, streamRequest.body, streamRequest.headers, signal)) {
         if (!ttft) { ttft = Date.now() - reqStart; }
         chunkCount++;
         fullText += chunk;
@@ -440,24 +375,9 @@ export async function* streamCommitMessage(
       return { text: fullText.trim(), usage: { inputTokens: 0, outputTokens: 0 }, finishReason: '' };
     }
 
-    const url = `${cleanUrl}/chat/completions`;
-    const streamBody: any = {
-      model,
-      messages: [
-        { role: 'system', content: prompt },
-        { role: 'user', content: 'Generate the commit message now.' },
-      ],
-      temperature: settings.temperature,
-      max_tokens: settings.maxTokens,
-      stream: true,
-    };
-    if (provider === 'openai') {
-      streamBody.stream_options = { include_usage: true };
-    }
-    const headers: Record<string, string> = { 'Authorization': `Bearer ${apiKey || ''}` };
     const reqStart = Date.now();
     let isReasoning = false;
-    for await (const chunk of streamPostJson(url, streamBody, headers, logFn, signal)) {
+    for await (const chunk of streamPostJson(streamRequest.url, streamRequest.body, streamRequest.headers, logFn, signal)) {
       if (chunk === '__REASONING__') {
         isReasoning = true;
         continue;
