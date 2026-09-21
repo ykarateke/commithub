@@ -32,6 +32,12 @@
           "default": "gpt-4o",
           "description": "AI model name (see provider documentation)"
         },
+        "commithub.modelProfile": {
+          "type": "string",
+          "default": "balanced",
+          "enum": ["fast", "balanced", "quality", "manual"],
+          "description": "Automatic model selection strategy; manual preserves an explicitly selected model"
+        },
         "commithub.baseUrl": {
           "type": "string",
           "default": "",
@@ -137,6 +143,7 @@
       { "command": "commithub.setApiKey", "title": "Set API Key" },
       { "command": "commithub.setProvider", "title": "Set AI Provider" },
       { "command": "commithub.setModel", "title": "Set Model" },
+      { "command": "commithub.setModelProfile", "title": "Set Model Profile" },
       { "command": "commithub.setBaseUrl", "title": "Set Base URL" },
       { "command": "commithub.setTemperature", "title": "Set Temperature" },
       { "command": "commithub.setMaxTokens", "title": "Set Max Tokens" },

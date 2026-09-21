@@ -8,7 +8,7 @@ import * as path from 'path';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import { getGitDiffForRoot } from '../services/git';
-import { filterAndSortModels } from '../services/modelDiscovery';
+import { filterAndSortModels, recommendModel } from '../services/modelDiscovery';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -40,6 +40,17 @@ suite('Model discovery', () => {
 		], 'gemini-flash');
 
 		assert.deepStrictEqual(models.map(model => model.label), ['gemini-flash']);
+	});
+
+	test('recommends models based on the selected profile', () => {
+		const models = [
+			{ label: 'provider-mini', description: '' },
+			{ label: 'provider-standard', description: '' },
+			{ label: 'provider-pro', description: '' },
+		];
+		assert.strictEqual(recommendModel(models, 'fast', 'provider-standard')?.label, 'provider-mini');
+		assert.strictEqual(recommendModel(models, 'balanced', 'provider-standard')?.label, 'provider-standard');
+		assert.strictEqual(recommendModel(models, 'quality', 'provider-standard')?.label, 'provider-pro');
 	});
 });
 

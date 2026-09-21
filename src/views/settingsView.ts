@@ -43,6 +43,8 @@ const groups: SettingGroup[] = [
 				description: () => '', prereq: () => ({ ok: true, hint: '' }) },
 			{ key: 'model', label: 'Model', icon: 'symbol-parameter', command: 'commithub.setModel',
 				description: () => cfg().get('model', 'gpt-4o'), prereq: hasProvider },
+			{ key: 'modelProfile', label: 'Model Profile', icon: 'dashboard', command: 'commithub.setModelProfile',
+				description: () => cfg().get('modelProfile', 'balanced'), prereq: hasProvider },
 			{ key: 'baseUrl', label: 'Base URL', icon: 'link', command: 'commithub.setBaseUrl',
 				description: () => {
 					const v = cfg().get('baseUrl', '');

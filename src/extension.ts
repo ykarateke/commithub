@@ -4,7 +4,7 @@ import { setConnectionStatus, recordCall, stats, initState } from './state';
 import { getGitDiff } from './services/git';
 import { generateCommitMessage, streamCommitMessage, CommitUsage } from './services/ai';
 import { apiKeySecretName, getProvider, providers, resolveBaseUrl } from './services/providers';
-import { clearModelCache, discoverModels, testProviderConnection } from './services/modelDiscovery';
+import { clearModelCache, discoverModels, ModelProfile, recommendModel, testProviderConnection } from './services/modelDiscovery';
 
 function cfg() {
 	return vscode.workspace.getConfiguration('commithub');
@@ -312,14 +312,20 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (apiKey || !getProvider(id)?.requiresApiKey) {
 				const models = await fetchModels(apiKey);
 				if (models?.length) {
-					const modelPick = await vscode.window.showQuickPick(models, {
-						title: `CommitHub — Select Model (${pick.label})`,
-						placeHolder: `${models.length} models fetched`,
-						matchOnDescription: true,
-					});
-					if (modelPick) {
-						await cfg().update('model', modelPick.label, vscode.ConfigurationTarget.Global);
-						vscode.window.showInformationMessage(`CommitHub: Model set to ${modelPick.label}`);
+					const profile = cfg().get<ModelProfile>('modelProfile', 'balanced');
+					if (profile === 'manual') {
+						const modelPick = await vscode.window.showQuickPick(models, {
+							title: `CommitHub — Select Model (${pick.label})`,
+							placeHolder: `${models.length} models fetched`,
+							matchOnDescription: true,
+						});
+						if (modelPick) {await cfg().update('model', modelPick.label, vscode.ConfigurationTarget.Global);}
+					} else {
+						const recommended = recommendModel(models, profile, getProvider(id)?.defaultModel || '');
+						if (recommended) {
+							await cfg().update('model', recommended.label, vscode.ConfigurationTarget.Global);
+							vscode.window.showInformationMessage(`CommitHub: ${profile} profile selected ${recommended.label}`);
+						}
 					}
 				} else {
 					const manual = await vscode.window.showInputBox({
@@ -398,6 +404,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			});
 			if (!pick) {return;}
 			await cfg().update('model', pick.label, vscode.ConfigurationTarget.Global);
+			await cfg().update('modelProfile', 'manual', vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(`CommitHub: Model set to ${pick.label}`);
 			settingsProvider.refresh();
 		})
@@ -439,7 +446,39 @@ export async function activate(context: vscode.ExtensionContext) {
 			});
 			if (!modelName) {return;}
 			await cfg().update('model', modelName, vscode.ConfigurationTarget.Global);
+			await cfg().update('modelProfile', 'manual', vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(`CommitHub: Model set to ${modelName}`);
+			settingsProvider.refresh();
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('commithub.setModelProfile', async () => {
+			const provider = cfg().get<string>('provider', '');
+			if (!provider) {return;}
+			const choices: { label: string; description: string; id: ModelProfile }[] = [
+				{ label: 'Balanced', description: 'Provider default or best general-purpose model', id: 'balanced' },
+				{ label: 'Fast', description: 'Prefer low-latency and lightweight models', id: 'fast' },
+				{ label: 'Quality', description: 'Prefer larger and reasoning-capable models', id: 'quality' },
+				{ label: 'Manual', description: 'Keep the model you select explicitly', id: 'manual' },
+			];
+			const selected = await vscode.window.showQuickPick(choices, { title: 'CommitHub Model Profile' });
+			if (!selected) {return;}
+			await cfg().update('modelProfile', selected.id, vscode.ConfigurationTarget.Global);
+			if (selected.id !== 'manual') {
+				const apiKey = await getApiKey(context, provider);
+				if (!apiKey && getProvider(provider)?.requiresApiKey) {
+					vscode.window.showWarningMessage('CommitHub: Set your API Key before applying an automatic model profile.');
+					settingsProvider.refresh();
+					return;
+				}
+				const models = await fetchModels(apiKey);
+				const recommended = recommendModel(models || [], selected.id, getProvider(provider)?.defaultModel || '');
+				if (recommended) {
+					await cfg().update('model', recommended.label, vscode.ConfigurationTarget.Global);
+					vscode.window.showInformationMessage(`CommitHub: ${selected.label} selected ${recommended.label}`);
+				}
+			}
 			settingsProvider.refresh();
 		})
 	);

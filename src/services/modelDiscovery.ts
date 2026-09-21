@@ -7,6 +7,8 @@ export interface DiscoveredModel {
 	description: string;
 }
 
+export type ModelProfile = 'fast' | 'balanced' | 'quality' | 'manual';
+
 type ApiModel = {
 	id?: string;
 	name?: string;
@@ -100,6 +102,30 @@ function modelScore(model: DiscoveredModel, defaultModel: string): number {
 	let score = preferredModelPatterns.reduce((total, pattern) => total + (pattern.test(model.label) ? 10 : 0), 0);
 	if (/preview|experimental|exp-|legacy/i.test(model.label)) {score -= 20;}
 	return score;
+}
+
+function profileScore(model: DiscoveredModel, profile: Exclude<ModelProfile, 'manual'>, defaultModel: string): number {
+	const name = model.label.toLowerCase();
+	if (profile === 'balanced') {return modelScore(model, defaultModel);}
+	if (profile === 'fast') {
+		let score = /mini|flash|haiku|small|fast|lite|8b/.test(name) ? 100 : 0;
+		if (/pro|opus|large|reason|70b|405b/.test(name)) {score -= 50;}
+		return score + modelScore(model, defaultModel) / 100;
+	}
+	let score = /opus|pro|large|reason|r1|70b|405b|sonnet/.test(name) ? 100 : 0;
+	if (/mini|haiku|small|lite|8b/.test(name)) {score -= 50;}
+	return score + modelScore(model, defaultModel) / 100;
+}
+
+export function recommendModel(
+	models: DiscoveredModel[],
+	profile: Exclude<ModelProfile, 'manual'>,
+	defaultModel: string,
+): DiscoveredModel | undefined {
+	return [...models].sort((a, b) =>
+		profileScore(b, profile, defaultModel) - profileScore(a, profile, defaultModel)
+		|| a.label.localeCompare(b.label)
+	)[0];
 }
 
 export function filterAndSortModels(
