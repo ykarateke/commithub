@@ -1,7 +1,7 @@
 import * as https from 'https';
 import * as http from 'http';
 import { FileDiff } from './git';
-import { getProviderAdapter } from './adapters';
+import { AdapterRequest, AdapterStreamEvent, getProviderAdapter, ProviderAdapter } from './adapters';
 
 interface CommitSettings {
   files: FileDiff[];
@@ -208,90 +208,27 @@ async function* parseSseLines(stream: http.IncomingMessage, cancelled: boolean):
   }
 }
 
-async function* streamPostJson(url: string, body: any, headers: Record<string, string>, logFn: (msg: string) => void, signal?: AbortSignal): AsyncGenerator<string | '__REASONING__', void, undefined> {
-  const stream = await makeStreamRequest(url, body, headers, signal);
+async function* streamAdapterEvents(
+  request: AdapterRequest,
+  adapter: ProviderAdapter,
+  logFn: (msg: string) => void,
+  signal?: AbortSignal,
+): AsyncGenerator<AdapterStreamEvent, void, undefined> {
+  const stream = await makeStreamRequest(request.url, request.body, request.headers, signal);
   await checkStreamError(stream);
 
-  let cancelled = false;
-  if (signal) { signal.addEventListener('abort', () => { cancelled = true; }, { once: true }); }
-
   let loggedFirstLine = false;
-  let reasoningChunks = 0;
-  let hasContent = false;
-  const MAX_REASONING_WAIT = 50;
-  for await (const line of parseSseLines(stream, cancelled)) {
-    if (cancelled) break;
+  for await (const line of parseSseLines(stream, false)) {
+    if (signal?.aborted) {break;}
     if (!loggedFirstLine) {
       loggedFirstLine = true;
       logFn(`[stream debug] first SSE line: "${line.slice(0, 300)}"`);
     }
     if (!line.startsWith('data:')) continue;
     const json = line.slice(5).trim();
-    if (json === '[DONE]') break;
+    if (json === '[DONE]') {break;}
     try {
-      const parsed = JSON.parse(json);
-      const delta = parsed?.choices?.[0]?.delta;
-      if (delta?.reasoning_content) {
-        reasoningChunks++;
-        if (reasoningChunks === 1) {
-          logFn(`[stream debug] reasoning model detected — yielding early signal`);
-          yield '__REASONING__';
-        }
-        if (reasoningChunks >= MAX_REASONING_WAIT && !hasContent) {
-          logFn(`[stream debug] early abort after ${reasoningChunks} reasoning chunks with no content`);
-          break;
-        }
-        continue;
-      }
-      const content = delta?.content || parsed?.choices?.[0]?.text || '';
-      if (content) {
-        hasContent = true;
-        yield content;
-      }
-    } catch { /* skip malformed chunk */ }
-  }
-  if (reasoningChunks > 0) {
-    logFn(`[stream debug] ${reasoningChunks} reasoning chunks, hasContent=${hasContent}`);
-  }
-}
-
-async function* streamPostAnthropic(url: string, body: any, headers: Record<string, string>, signal?: AbortSignal): AsyncGenerator<string, void, undefined> {
-  const stream = await makeStreamRequest(url, { ...body, stream: true }, headers, signal);
-  await checkStreamError(stream);
-
-  let cancelled = false;
-  if (signal) { signal.addEventListener('abort', () => { cancelled = true; }, { once: true }); }
-
-  for await (const line of parseSseLines(stream, cancelled)) {
-    if (cancelled) break;
-    if (!line.startsWith('data:')) continue;
-    const json = line.slice(5).trim();
-    try {
-      const parsed = JSON.parse(json);
-      if (parsed?.type === 'content_block_delta') {
-        const text = parsed?.delta?.text || '';
-        if (text) yield text;
-      }
-    } catch { /* skip malformed chunk */ }
-  }
-}
-
-async function* streamPostGemini(url: string, body: any, headers: Record<string, string>, signal?: AbortSignal): AsyncGenerator<string, void, undefined> {
-  const streamUrl = url.replace(/:generateContent$/, ':streamGenerateContent?alt=sse');
-  const stream = await makeStreamRequest(streamUrl, body, headers, signal);
-  await checkStreamError(stream);
-
-  let cancelled = false;
-  if (signal) { signal.addEventListener('abort', () => { cancelled = true; }, { once: true }); }
-
-  for await (const line of parseSseLines(stream, cancelled)) {
-    if (cancelled) break;
-    if (!line.startsWith('data:')) continue;
-    const json = line.slice(5).trim();
-    try {
-      const parsed = JSON.parse(json);
-      const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      if (text) yield text;
+      yield adapter.parseStreamEvent(JSON.parse(json));
     } catch { /* skip malformed chunk */ }
   }
 }
@@ -336,7 +273,6 @@ export async function* streamCommitMessage(
   logFn: (msg: string) => void,
   signal?: AbortSignal,
 ): AsyncGenerator<string, { text: string; usage: CommitUsage; finishReason: string }, undefined> {
-  const promptStart = Date.now();
   const prompt = buildPrompt(settings);
   const adapter = getProviderAdapter(provider);
   const config = adapter.protocol;
@@ -349,46 +285,37 @@ export async function* streamCommitMessage(
   logFn(`[stream] config=${config} model=${model} promptSize=${prompt.length} chars maxTokens=${settings.maxTokens} files=${settings.files.length}`);
 
   try {
-    if (config === 'anthropic') {
-      const reqStart = Date.now();
-      for await (const chunk of streamPostAnthropic(streamRequest.url, streamRequest.body, streamRequest.headers, signal)) {
-        if (!ttft) { ttft = Date.now() - reqStart; }
-        chunkCount++;
-        fullText += chunk;
-        yield chunk;
-      }
-      const totalMs = Date.now() - reqStart;
-      logFn(`[stream] anthropic done — TTFT=${ttft}ms total=${totalMs}ms chunks=${chunkCount} responseLen=${fullText.length} chars`);
-      return { text: fullText.trim(), usage: { inputTokens: 0, outputTokens: 0 }, finishReason: '' };
-    }
-
-    if (config === 'gemini') {
-      const reqStart = Date.now();
-      for await (const chunk of streamPostGemini(streamRequest.url, streamRequest.body, streamRequest.headers, signal)) {
-        if (!ttft) { ttft = Date.now() - reqStart; }
-        chunkCount++;
-        fullText += chunk;
-        yield chunk;
-      }
-      const totalMs = Date.now() - reqStart;
-      logFn(`[stream] gemini done — TTFT=${ttft}ms total=${totalMs}ms chunks=${chunkCount} responseLen=${fullText.length} chars`);
-      return { text: fullText.trim(), usage: { inputTokens: 0, outputTokens: 0 }, finishReason: '' };
-    }
-
     const reqStart = Date.now();
     let isReasoning = false;
-    for await (const chunk of streamPostJson(streamRequest.url, streamRequest.body, streamRequest.headers, logFn, signal)) {
-      if (chunk === '__REASONING__') {
+    let reasoningChunks = 0;
+    let usage: CommitUsage = { inputTokens: 0, outputTokens: 0 };
+    let finishReason = '';
+    for await (const event of streamAdapterEvents(streamRequest, adapter, logFn, signal)) {
+      if (event.inputTokens !== undefined) {usage.inputTokens = event.inputTokens;}
+      if (event.outputTokens !== undefined) {usage.outputTokens = event.outputTokens;}
+      if (event.finishReason) {finishReason = event.finishReason;}
+      if (event.reasoning) {
         isReasoning = true;
+        reasoningChunks++;
+        if (reasoningChunks === 1) {
+          logFn('[stream debug] reasoning model detected');
+          yield '__REASONING__';
+        }
+        if (reasoningChunks >= 50 && !fullText) {
+          logFn(`[stream debug] early abort after ${reasoningChunks} reasoning chunks with no content`);
+          break;
+        }
         continue;
       }
+      const chunk = event.text || '';
+      if (!chunk) {continue;}
       if (!ttft) { ttft = Date.now() - reqStart; }
       chunkCount++;
       fullText += chunk;
       yield chunk;
     }
     const totalMs = Date.now() - reqStart;
-    logFn(`[stream] openai-compat done — TTFT=${ttft}ms total=${totalMs}ms chunks=${chunkCount} responseLen=${fullText.length} chars reasoning=${isReasoning}`);
+    logFn(`[stream] ${config} done — TTFT=${ttft}ms total=${totalMs}ms chunks=${chunkCount} responseLen=${fullText.length} chars reasoning=${isReasoning}`);
 
     if (isReasoning && !fullText.trim()) {
       const wastedMs = Date.now() - reqStart;
@@ -417,7 +344,7 @@ export async function* streamCommitMessage(
       return fallback;
     }
 
-    return { text: fullText.trim(), usage: { inputTokens: 0, outputTokens: 0 }, finishReason: '' };
+    return { text: fullText.trim(), usage, finishReason };
   } catch (e: any) {
     logFn(`[stream] FAILED after ${chunkCount} chunks, ${fullText.length} chars — ${e.message}`);
     if (e.message === 'Canceled') { throw e; }

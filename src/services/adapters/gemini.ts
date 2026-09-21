@@ -25,4 +25,13 @@ export const geminiAdapter: ProviderAdapter = {
 			outputTokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
 		};
 	},
+	parseStreamEvent(data: any) {
+		const parts = data?.candidates?.[0]?.content?.parts || [];
+		return {
+			text: parts.map((part: any) => part?.text || '').join('') || undefined,
+			inputTokens: data?.usageMetadata?.promptTokenCount,
+			outputTokens: data?.usageMetadata?.candidatesTokenCount,
+			finishReason: data?.candidates?.[0]?.finishReason || undefined,
+		};
+	},
 };

@@ -22,8 +22,17 @@ export interface AdapterResponse {
 	finishReason: string;
 }
 
+export interface AdapterStreamEvent {
+	text?: string;
+	reasoning?: boolean;
+	inputTokens?: number;
+	outputTokens?: number;
+	finishReason?: string;
+}
+
 export interface ProviderAdapter {
 	readonly protocol: 'openai' | 'anthropic' | 'gemini';
 	createRequest(options: AdapterOptions): AdapterRequest;
 	parseResponse(data: any): AdapterResponse;
+	parseStreamEvent(data: any): AdapterStreamEvent;
 }

@@ -68,6 +68,10 @@ suite('AI provider adapters', () => {
 		assert.strictEqual(request.headers.Authorization, 'Bearer secret');
 		assert.strictEqual(request.body.stream, true);
 		assert.deepStrictEqual(request.body.stream_options, { include_usage: true });
+		assert.deepStrictEqual(adapter.parseStreamEvent({
+			choices: [{ delta: { reasoning_content: 'thinking' }, finish_reason: null }],
+			usage: { prompt_tokens: 8, completion_tokens: 3 },
+		}), { text: undefined, reasoning: true, inputTokens: 8, outputTokens: 3, finishReason: undefined });
 	});
 
 	test('builds Gemini generation config and parses all text parts', () => {
@@ -77,6 +81,10 @@ suite('AI provider adapters', () => {
 		assert.deepStrictEqual(request.body.generationConfig, { temperature: 0.2, maxOutputTokens: 321 });
 		const response = adapter.parseResponse({ candidates: [{ content: { parts: [{ text: 'one' }, { text: ' two' }] } }] });
 		assert.strictEqual(response.text, 'one two');
+		assert.deepStrictEqual(adapter.parseStreamEvent({
+			candidates: [{ content: { parts: [{ text: 'chunk' }] }, finishReason: 'STOP' }],
+			usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 2 },
+		}), { text: 'chunk', inputTokens: 7, outputTokens: 2, finishReason: 'STOP' });
 	});
 
 	test('parses Anthropic stop reason and usage from response root', () => {
@@ -88,6 +96,9 @@ suite('AI provider adapters', () => {
 		assert.deepStrictEqual(response, {
 			text: 'result', finishReason: 'end_turn', inputTokens: 10, outputTokens: 4,
 		});
+		assert.deepStrictEqual(adapter.parseStreamEvent({
+			type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 4 },
+		}), { text: undefined, inputTokens: undefined, outputTokens: 4, finishReason: 'end_turn' });
 	});
 });
 

@@ -27,4 +27,12 @@ export const anthropicAdapter: ProviderAdapter = {
 			outputTokens: data?.usage?.output_tokens ?? 0,
 		};
 	},
+	parseStreamEvent(data: any) {
+		return {
+			text: data?.type === 'content_block_delta' ? data?.delta?.text || undefined : undefined,
+			inputTokens: data?.message?.usage?.input_tokens ?? data?.usage?.input_tokens,
+			outputTokens: data?.usage?.output_tokens,
+			finishReason: data?.delta?.stop_reason || undefined,
+		};
+	},
 };

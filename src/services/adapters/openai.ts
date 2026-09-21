@@ -30,4 +30,14 @@ export const openAiAdapter: ProviderAdapter = {
 			outputTokens: data?.usage?.completion_tokens ?? 0,
 		};
 	},
+	parseStreamEvent(data: any) {
+		const delta = data?.choices?.[0]?.delta;
+		return {
+			text: delta?.content || data?.choices?.[0]?.text || undefined,
+			reasoning: Boolean(delta?.reasoning_content),
+			inputTokens: data?.usage?.prompt_tokens,
+			outputTokens: data?.usage?.completion_tokens,
+			finishReason: data?.choices?.[0]?.finish_reason || undefined,
+		};
+	},
 };
