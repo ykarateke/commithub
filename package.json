@@ -2,7 +2,7 @@
   "name": "commithub",
   "displayName": "CommitHub",
   "description": "AI-powered Git commit message generator.",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "publisher": "YasinKarateke",
   "repository": {
     "type": "git",
@@ -14,7 +14,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "icon": "images/commithub-sparkle.png",
   "main": "./dist/extension.js",
   "contributes": {
@@ -24,7 +26,20 @@
         "commithub.provider": {
           "type": "string",
           "default": "openai",
-          "enum": ["openai", "anthropic", "google_gemini", "zhipu_glm", "zhipu_glm_coding", "xai_grok", "deepseek", "mistral", "ollama", "openrouter", "groq", "together"],
+          "enum": [
+            "openai",
+            "anthropic",
+            "google_gemini",
+            "zhipu_glm",
+            "zhipu_glm_coding",
+            "xai_grok",
+            "deepseek",
+            "mistral",
+            "ollama",
+            "openrouter",
+            "groq",
+            "together"
+          ],
           "description": "AI provider for commit message generation"
         },
         "commithub.model": {
@@ -35,7 +50,12 @@
         "commithub.modelProfile": {
           "type": "string",
           "default": "balanced",
-          "enum": ["fast", "balanced", "quality", "manual"],
+          "enum": [
+            "fast",
+            "balanced",
+            "quality",
+            "manual"
+          ],
           "description": "Automatic model selection strategy; manual preserves an explicitly selected model"
         },
         "commithub.baseUrl": {
@@ -59,7 +79,40 @@
         "commithub.language": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "en", "tr", "de", "fr", "es", "pt", "it", "nl", "pl", "ru", "ja", "ko", "zh-CN", "zh-TW", "ar", "hi", "sv", "da", "fi", "nb", "cs", "hu", "ro", "uk", "el", "th", "vi", "bg", "hr", "sk", "sl"],
+          "enum": [
+            "auto",
+            "en",
+            "tr",
+            "de",
+            "fr",
+            "es",
+            "pt",
+            "it",
+            "nl",
+            "pl",
+            "ru",
+            "ja",
+            "ko",
+            "zh-CN",
+            "zh-TW",
+            "ar",
+            "hi",
+            "sv",
+            "da",
+            "fi",
+            "nb",
+            "cs",
+            "hu",
+            "ro",
+            "uk",
+            "el",
+            "th",
+            "vi",
+            "bg",
+            "hr",
+            "sk",
+            "sl"
+          ],
           "description": "Commit message language"
         },
         "commithub.maxLength": {
@@ -91,7 +144,12 @@
         "commithub.tone": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "formal", "casual", "technical"],
+          "enum": [
+            "auto",
+            "formal",
+            "casual",
+            "technical"
+          ],
           "description": "Commit message tone"
         },
         "commithub.scopeDetection": {
@@ -140,28 +198,94 @@
         "title": "Generate Commit Message",
         "icon": "images/commithub-sparkle.svg"
       },
-      { "command": "commithub.setApiKey", "title": "Set API Key" },
-      { "command": "commithub.setProvider", "title": "Set AI Provider" },
-      { "command": "commithub.setModel", "title": "Set Model" },
-      { "command": "commithub.setModelProfile", "title": "Set Model Profile" },
-      { "command": "commithub.setBaseUrl", "title": "Set Base URL" },
-      { "command": "commithub.setTemperature", "title": "Set Temperature" },
-      { "command": "commithub.setMaxTokens", "title": "Set Max Tokens" },
-      { "command": "commithub.setLanguage", "title": "Set Language" },
-      { "command": "commithub.setMaxLength", "title": "Set Max Length" },
-      { "command": "commithub.setConventionalCommit", "title": "Toggle Conventional Commits" },
-      { "command": "commithub.setIncludeBody", "title": "Toggle Include Body" },
-      { "command": "commithub.setIncludeFooter", "title": "Toggle Include Footer" },
-      { "command": "commithub.setEmoji", "title": "Toggle Emoji" },
-      { "command": "commithub.setTone", "title": "Set Message Tone" },
-      { "command": "commithub.setScopeDetection", "title": "Toggle Scope Detection" },
-      { "command": "commithub.setBreakingChanges", "title": "Toggle Breaking Changes Detection" },
-      { "command": "commithub.setMaxDiffSize", "title": "Set Max Diff Size" },
-      { "command": "commithub.setExcludeFiles", "title": "Set Exclude Files" },
-      { "command": "commithub.setConventionalTypes", "title": "Set Conventional Types" },
-      { "command": "commithub.showStats", "title": "Show Statistics" },
-      { "command": "commithub.testConnection", "title": "Test Connection" },
-      { "command": "commithub.fetchModels", "title": "Fetch Models from API" }
+      {
+        "command": "commithub.setApiKey",
+        "title": "Set API Key"
+      },
+      {
+        "command": "commithub.setProvider",
+        "title": "Set AI Provider"
+      },
+      {
+        "command": "commithub.setModel",
+        "title": "Set Model"
+      },
+      {
+        "command": "commithub.setModelProfile",
+        "title": "Set Model Profile"
+      },
+      {
+        "command": "commithub.setBaseUrl",
+        "title": "Set Base URL"
+      },
+      {
+        "command": "commithub.setTemperature",
+        "title": "Set Temperature"
+      },
+      {
+        "command": "commithub.setMaxTokens",
+        "title": "Set Max Tokens"
+      },
+      {
+        "command": "commithub.setLanguage",
+        "title": "Set Language"
+      },
+      {
+        "command": "commithub.setMaxLength",
+        "title": "Set Max Length"
+      },
+      {
+        "command": "commithub.setConventionalCommit",
+        "title": "Toggle Conventional Commits"
+      },
+      {
+        "command": "commithub.setIncludeBody",
+        "title": "Toggle Include Body"
+      },
+      {
+        "command": "commithub.setIncludeFooter",
+        "title": "Toggle Include Footer"
+      },
+      {
+        "command": "commithub.setEmoji",
+        "title": "Toggle Emoji"
+      },
+      {
+        "command": "commithub.setTone",
+        "title": "Set Message Tone"
+      },
+      {
+        "command": "commithub.setScopeDetection",
+        "title": "Toggle Scope Detection"
+      },
+      {
+        "command": "commithub.setBreakingChanges",
+        "title": "Toggle Breaking Changes Detection"
+      },
+      {
+        "command": "commithub.setMaxDiffSize",
+        "title": "Set Max Diff Size"
+      },
+      {
+        "command": "commithub.setExcludeFiles",
+        "title": "Set Exclude Files"
+      },
+      {
+        "command": "commithub.setConventionalTypes",
+        "title": "Set Conventional Types"
+      },
+      {
+        "command": "commithub.showStats",
+        "title": "Show Statistics"
+      },
+      {
+        "command": "commithub.testConnection",
+        "title": "Test Connection"
+      },
+      {
+        "command": "commithub.fetchModels",
+        "title": "Fetch Models from API"
+      }
     ],
     "menus": {
       "scm/title": [

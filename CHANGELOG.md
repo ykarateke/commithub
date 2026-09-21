@@ -4,6 +4,30 @@ All notable changes to the "commithub" extension will be documented in this file
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.4.0] - 2026-09-21
+
+### Added
+- Automatic `Fast`, `Balanced`, `Quality`, and `Manual` model profiles
+- Provider-specific API keys in VS Code SecretStorage
+- Central provider registry, model discovery cache, and protocol adapters
+- Dedicated DeepSeek adapter with profile-controlled thinking mode
+- HTTP/SSE transport, adapter, timeout, cancellation, and Git regression tests
+
+### Changed
+- Model discovery now filters non-text models and ranks suitable chat models
+- Streaming now records usage metadata and finish reasons across providers
+- Git analysis selects the repository for the active file in multi-root and nested workspaces
+- Git paths use NUL-delimited metadata for Unicode and rename safety
+- Large tracked diffs fall back to summaries; untracked reads are capped at 100 lines and 256 KB
+
+### Fixed
+- Stale Git diff results caused by status-only caching
+- First-commit repositories missing edits made after staging
+- Commit messages being written to the wrong repository's SCM input
+- Gemini model-list authentication and generation limits
+- Anthropic stop-reason parsing and multi-part text responses
+- Binary and symlink targets being included in untracked-file prompts
+
 ## [1.3.1] - 2026-07-06
 
 ### Fixed
